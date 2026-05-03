@@ -292,12 +292,12 @@ sed '/pattern/d' file.txt               # Delete lines matching pattern
 
 **`sed` substitution syntax:** `s/search/replace/flags`
 
-| Part | Meaning |
-|------|---------|
-| `s` | Substitute command |
+| Substitution flag | Meaning |
+|-------------------|---------|
 | `g` | Global: replace all matches on each line |
 | `i` | Case-insensitive match |
-| `-i` | Edit file in place (use with caution) |
+
+> `-i` is a **`sed` command-line option** (not a substitution flag): it edits the file in place instead of printing to stdout. Use as `sed -i 's/old/new/g' file.txt`.
 
 ---
 
@@ -540,7 +540,7 @@ dd if=/dev/urandom of=~/random.bin bs=1M count=1   # Generate 1 MiB of random da
 
 ```bash
 sudo useradd -m samar                              # Create user with home directory (/home/samar)
-sudo useradd -d /custom/home samar                 # Set a custom home directory path
+sudo useradd -d /custom/home samar                 # Set a custom home directory path (add -m to also create it)
 sudo useradd -s /bin/bash samar                    # Set the login shell
 sudo useradd -g users samar                        # Set primary group
 sudo useradd -G wheel,users samar                  # Add to supplementary groups at creation
@@ -584,7 +584,8 @@ sudo usermod -c "Full Name" username            # Update full display name
 sudo usermod -s /bin/bash username              # Change default shell
 sudo usermod -G wheel,users username            # Replace supplementary groups
 sudo usermod -aG docker,wheel username          # APPEND to supplementary groups (-a preserves existing)
-chsh -s /bin/bash username                      # Change login shell (can be run by user themselves)
+chsh -s /bin/bash                               # User changing their OWN shell (no sudo needed)
+sudo chsh -s /bin/bash username                 # Root changing another user's shell
 ```
 
 ---
@@ -1230,7 +1231,7 @@ journalctl -u nginx                     # Logs for nginx service
 journalctl -u nginx -f                  # Follow nginx logs live
 journalctl -u nginx -r                  # Reverse (newest first)
 journalctl -p err                       # Error level and above only
-journalctl -p warning..err              # Range of priorities
+journalctl -p err..warning              # Range: err(3) through warning(4)
 
 journalctl --since "today"
 journalctl --since "2 hours ago"
@@ -1362,7 +1363,7 @@ sudo parted /dev/sdb                    # Open interactive session on a specific
 sudo mkfs.xfs /dev/sdb1                 # Format as XFS    (default on RHEL; xfsprogs included)
 sudo mkfs.ext4 /dev/sdb1               # Format as ext4   (e2fsprogs included)
 sudo mkfs.vfat /dev/sdb1               # Format as FAT32  (requires: sudo dnf install dosfstools)
-sudo mkfs.exfat /dev/sdb1              # Format as exFAT  (requires EPEL: sudo dnf install exfatprogs)
+sudo mkfs.exfat /dev/sdb1              # Format as exFAT  (RHEL 8: requires EPEL — sudo dnf install exfatprogs; RHEL 9: in AppStream)
 
 # Label a partition:
 sudo xfs_admin -L mydata /dev/sdb1      # Label XFS filesystem
@@ -1396,7 +1397,7 @@ sudo vi /etc/fstab
 
 ```
 # device/UUID                                           mountpoint  fstype  options      dump  pass
-UUID=31b8c5a6-738d-4f3d-b9f2-1a4e7c830d51   /mnt/data    xfs     defaults     0     2
+UUID=31b8c5a6-738d-4f3d-b9f2-1a4e7c830d51   /mnt/data    xfs     defaults     0     0
 /dev/sdb1                                   /mnt/backup  ext4    ro,noexec    0     0
 ```
 
@@ -1458,7 +1459,7 @@ sudo dnf install lvm2
 ```bash
 # 1. Prepare disk with parted (mark partition as LVM):
 sudo parted /dev/sdb mklabel gpt
-sudo parted /dev/sdb mkpart primary 0% 100%
+sudo parted /dev/sdb mkpart pv 0% 100%      # GPT uses a name (not 'primary' — that's MBR only)
 sudo parted /dev/sdb set 1 lvm on
 
 # 2. Create Physical Volumes (PV):
@@ -2067,6 +2068,7 @@ sudo tcpdump -i ens33 port 80 or port 443             # All web traffic
 ### NIC Information — `ethtool`
 
 ```bash
+# ethtool is in RHEL BaseOS and is usually pre-installed; install if missing:
 sudo dnf install ethtool
 
 ethtool ens33               # NIC speed, duplex, link status, auto-negotiation
@@ -2237,5 +2239,3 @@ sudo journalctl -t setroubleshoot --since "1 hour ago"  # SELinux troubleshoot m
 sudo restorecon -v -R /etc
 # 5. Reboot normally to re-enter enforcing mode
 ```
-
----
