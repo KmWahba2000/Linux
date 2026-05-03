@@ -1045,14 +1045,6 @@ sudo dnf search nginx                       # Search available packages
 dnf info nginx                              # Package details
 sudo dnf check                              # Check for RPM database problems
 
-# Repository management:
-ls /etc/yum.repos.d/                                              # List configured repos
-sudo vi /etc/yum.repos.d/<repo-name>.repo                         # Edit a repo file
-sudo dnf install dnf-plugins-core                                 # Required for config-manager
-sudo dnf config-manager --add-repo https://example.repo/pkg.repo  # Add a repo
-sudo dnf config-manager --disable example-repo                    # Disable a repo
-sudo dnf config-manager --enable example-repo                     # Enable a repo
-
 # Kernel version management:
 sudo dnf mark install kernel-core-6.8.0-31.el9.x86_64   # Mark as user-installed (protects from autoremove)
 sudo dnf install python3-dnf-plugin-versionlock          # Install versionlock plugin
@@ -1073,6 +1065,219 @@ rpm -qf /usr/bin/ls                 # Which package owns a file
 rpm -V bash                         # Verify a specific package
 rpm -Va                             # Verify all installed packages
 rpm -K package.rpm                  # Check .rpm GPG signature
+```
+
+---
+
+### Repository Management
+
+#### Repo File Location & Structure
+
+All repository definitions live in `/etc/yum.repos.d/` as `.repo` files.
+Each file can contain one or more `[repo-id]` sections.
+
+```
+/etc/yum.repos.d/
+├── redhat.repo          # Auto-managed by subscription-manager — do not edit manually
+├── epel.repo            # EPEL (added manually or via RPM)
+├── nginx.repo           # Third-party vendor repo
+└── local.repo           # Custom local/offline repo
+```
+
+**Annotated `.repo` file — every directive explained:**
+
+```ini
+[nginx-stable]                          # Repo ID — used in dnf commands (must be unique, no spaces)
+name=nginx stable repo                  # Human-readable label shown in dnf output
+baseurl=https://nginx.org/packages/rhel/$releasever/$basearch/
+                                        # Direct URL to the repo (repodata/ directory lives here)
+                                        # $releasever = OS major version (e.g. 9)
+                                        # $basearch   = CPU arch (e.g. x86_64, aarch64)
+# mirrorlist=https://...               # Alternative to baseurl: URL that returns a list of mirror URLs
+# metalink=https://...                 # Alternative to mirrorlist: cryptographically verified mirror list
+enabled=1                               # 1 = active, 0 = disabled (dnf ignores it)
+gpgcheck=1                              # 1 = verify package signatures against gpgkey (strongly recommended)
+gpgkey=https://nginx.org/keys/nginx_signing.key
+                                        # URL or file:/// path to the repo's GPG public key
+# repo_gpgcheck=1                       # Also verify the repodata itself (not just packages)
+# skip_if_unavailable=1                 # Don't abort dnf if this repo is unreachable (good for optional repos)
+# priority=50                           # Lower number = higher priority (1–99); default 99
+                                        # Requires: sudo dnf install dnf-plugin-priorities
+# exclude=kernel* php*                  # Space-separated glob patterns — never install these from this repo
+# includepkgs=nginx nginx-module-*      # Whitelist: ONLY install these packages from this repo
+# module_hotfixes=1                     # Bypass module stream filtering (needed for some third-party repos)
+# proxy=http://proxy.example.com:3128  # Per-repo proxy override
+# sslverify=1                           # Verify TLS certificate of the baseurl server (default: 1)
+# sslcacert=/etc/pki/tls/certs/ca.crt  # Custom CA cert for TLS verification
+# sslclientcert=/etc/pki/tls/...       # Client cert for mutual TLS repos
+# sslclientkey=/etc/pki/tls/...        # Client private key for mutual TLS
+# cost=1000                             # Relative cost; DNF prefers lower-cost repos for the same package
+```
+
+> ⚠️ Never manually edit `/etc/yum.repos.d/redhat.repo` — it is owned and overwritten by `subscription-manager`.
+
+---
+
+#### Listing & Inspecting Repos
+
+```bash
+dnf repolist                            # All enabled repos (ID + name + package count)
+dnf repolist --all                      # All repos: enabled AND disabled
+dnf repolist --disabled                 # Only disabled repos
+dnf repoinfo nginx-stable               # Full details for one repo (URLs, GPG, counts)
+dnf repoinfo --all                      # Full details for every configured repo
+
+ls /etc/yum.repos.d/                    # See all .repo files on disk
+cat /etc/yum.repos.d/epel.repo          # Read a specific repo file
+```
+
+---
+
+#### Adding a Repo
+
+**Method 1 — Manually create a `.repo` file (most control):**
+```bash
+sudo vi /etc/yum.repos.d/nginx.repo
+```
+```ini
+[nginx-stable]
+name=nginx stable repo
+baseurl=https://nginx.org/packages/rhel/$releasever/$basearch/
+enabled=1
+gpgcheck=1
+gpgkey=https://nginx.org/keys/nginx_signing.key
+```
+
+**Method 2 — `dnf config-manager` (auto-creates the `.repo` file):**
+```bash
+sudo dnf install dnf-plugins-core       # Install config-manager plugin if not present
+sudo dnf config-manager --add-repo https://nginx.org/packages/rhel/9/nginx.repo
+# Creates: /etc/yum.repos.d/nginx.repo
+# ⚠️ gpgcheck is set to 0 by default — always enable it manually after:
+sudo vi /etc/yum.repos.d/nginx.repo     # Set gpgcheck=1 and add gpgkey=
+```
+
+**Method 3 — Install a repo RPM (installs the `.repo` file + GPG key automatically):**
+```bash
+sudo dnf install https://example.com/repo-release.rpm
+# The RPM drops the .repo file into /etc/yum.repos.d/ and imports the GPG key
+```
+
+---
+
+#### Enabling, Disabling & Removing Repos
+
+```bash
+# Temporary override — affects only the current dnf command:
+sudo dnf install nginx --enablerepo=nginx-stable    # Enable a disabled repo for this command only
+sudo dnf upgrade --disablerepo=epel                 # Skip a repo for this command only
+sudo dnf upgrade --disablerepo="*" --enablerepo=nginx-stable  # Use ONLY one repo
+
+# Permanent enable/disable (edits enabled= in the .repo file):
+sudo dnf config-manager --enable nginx-stable
+sudo dnf config-manager --disable nginx-stable
+
+# Remove a repo entirely:
+sudo rm /etc/yum.repos.d/nginx.repo
+sudo dnf clean all                                  # Clear cached metadata after removal
+```
+
+---
+
+#### GPG Key Management
+
+```bash
+# Import a GPG key manually:
+sudo rpm --import https://nginx.org/keys/nginx_signing.key
+sudo rpm --import /path/to/key.gpg
+
+# List all imported GPG keys:
+rpm -qa gpg-pubkey*
+rpm -qi gpg-pubkey-<id>             # Details of a specific imported key
+
+# Remove an imported key:
+sudo rpm -e gpg-pubkey-<id>
+```
+
+> Always import the GPG key **before** installing packages from a new repo.
+> Set `gpgcheck=1` in every `.repo` file — never leave it at `0` in production.
+
+---
+
+#### RHEL Subscription Repos (`subscription-manager`)
+
+```bash
+# View system subscription status:
+sudo subscription-manager status
+sudo subscription-manager list --available        # Available subscriptions
+sudo subscription-manager list --consumed         # Currently attached subscriptions
+
+# List all repos available to your subscription:
+sudo subscription-manager repos --list
+sudo subscription-manager repos --list-enabled    # Enabled only
+sudo subscription-manager repos --list-disabled   # Disabled only
+
+# Enable / disable a subscription repo:
+sudo subscription-manager repos --enable rhel-9-for-x86_64-appstream-rpms
+sudo subscription-manager repos --disable rhel-9-for-x86_64-appstream-rpms
+
+# Common RHEL 9 repos:
+# rhel-9-for-x86_64-baseos-rpms          → Core OS packages
+# rhel-9-for-x86_64-appstream-rpms       → Applications and runtimes
+# codeready-builder-for-rhel-9-x86_64-rpms → Development tools (required by EPEL)
+
+# Refresh subscription data from Red Hat:
+sudo subscription-manager refresh
+sudo dnf clean all && sudo dnf makecache
+```
+
+---
+
+#### Creating a Local / Offline Repo
+
+Useful for air-gapped systems or distributing packages internally.
+
+```bash
+# 1. Install the createrepo tool:
+sudo dnf install createrepo_c
+
+# 2. Create a directory and populate it with RPMs:
+sudo mkdir -p /opt/localrepo
+sudo cp /path/to/*.rpm /opt/localrepo/
+
+# 3. Generate the repodata metadata:
+sudo createrepo_c /opt/localrepo/
+
+# 4. Create the .repo file:
+sudo vi /etc/yum.repos.d/local.repo
+```
+```ini
+[local-repo]
+name=Local Offline Repository
+baseurl=file:///opt/localrepo/
+enabled=1
+gpgcheck=0                              # No GPG for internal RPMs (or set up your own key)
+```
+```bash
+# 5. Test it:
+sudo dnf repolist
+sudo dnf install <package-from-local-repo>
+
+# After adding new RPMs, regenerate metadata:
+sudo createrepo_c --update /opt/localrepo/
+sudo dnf clean metadata                 # Force dnf to re-read the updated metadata
+```
+
+---
+
+#### Cache Management
+
+```bash
+sudo dnf clean all                      # Remove all cached packages, metadata, and headers
+sudo dnf clean metadata                 # Remove only cached repo metadata (repodata)
+sudo dnf clean packages                 # Remove only cached downloaded RPMs
+sudo dnf makecache                      # Pre-download and cache repo metadata now
+sudo dnf makecache --timer              # Refresh only if cache is stale (used by systemd timer)
 ```
 
 ---
