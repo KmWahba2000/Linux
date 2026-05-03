@@ -705,10 +705,10 @@ ls -al      # Long listing showing permissions
 
 ```
 -rwxr-xr--  1 user developers 4096 Mar 21 12:00 script.sh
-│└─┬─┘└─┬─┘└─┬─┘
-│  │    │    └──── Others: r-- (read only)
-│  │    └───────── Group:  r-x (read + execute)
-│  └────────────── Owner:  rwx (read + write + execute)
+│└┬┘└┬┘└┬┘
+│ │  │  └───────── Others: r-- (read only)
+│ │  └──────────── Group:  r-x (read + execute)
+│ └─────────────── Owner:  rwx (read + write + execute)
 └───────────────── File type: - (file), d (dir), l (symlink)
 ```
 
