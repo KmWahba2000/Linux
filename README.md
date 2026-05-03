@@ -112,6 +112,38 @@ rmdir pages                             # Delete an EMPTY directory only
 
 ---
 
+### Getting Help — `man` / `info` / `--help`
+
+```bash
+man ls                  # Full manual page for a command
+man 5 passwd            # Section 5 = file formats — explains /etc/passwd structure
+man -k keyword          # Search all man page names and descriptions (same as apropos)
+apropos firewall        # Find man pages related to a keyword
+whatis ls               # One-line description of a command
+
+info coreutils          # GNU info pages — more detailed than man for some tools
+
+ls --help               # Inline help (quick flags reference)
+dnf --help              # Most commands support --help
+```
+
+**Man page sections:**
+
+| Section | Covers |
+|---------|--------|
+| 1 | User commands (`ls`, `cp`, `grep`) |
+| 5 | File formats and config files (`passwd`, `fstab`, `crontab`) |
+| 7 | Miscellaneous (conventions, protocols) |
+| 8 | System admin commands (`mount`, `useradd`, `fdisk`) |
+
+```bash
+# When a name exists in multiple sections, specify which one:
+man 1 passwd            # The passwd command
+man 5 passwd            # The /etc/passwd file format
+```
+
+---
+
 ## 2. Text File Operations
 
 ### Viewing File Content
@@ -1045,6 +1077,25 @@ sudo dnf search nginx                       # Search available packages
 dnf info nginx                              # Package details
 sudo dnf check                              # Check for RPM database problems
 
+# Package groups:
+dnf group list                              # List all available package groups
+dnf group list --installed                  # List only installed groups
+dnf group info 'Development Tools'          # Show packages inside a group
+sudo dnf group install 'Development Tools'  # Install all packages in a group
+sudo dnf group remove  'Development Tools'  # Remove a group
+
+# Transaction history:
+dnf history                                 # Full transaction history (newest first)
+dnf history info 5                          # Details of transaction #5
+sudo dnf history undo 5                     # Roll back transaction #5
+sudo dnf history redo 5                     # Re-apply transaction #5
+
+# Security upgrades:
+sudo dnf upgrade --security                 # Apply security fixes only
+sudo dnf upgrade --sec-severity=Important   # Apply only Important (or Critical) severity fixes
+sudo dnf upgrade --sec-severity=Critical    # Apply only Critical severity fixes
+dnf updateinfo list security                # List available security advisories
+
 # Kernel version management:
 sudo dnf mark install kernel-core-6.8.0-31.el9.x86_64   # Mark as user-installed (protects from autoremove)
 sudo dnf install python3-dnf-plugin-versionlock          # Install versionlock plugin
@@ -1066,6 +1117,37 @@ rpm -V bash                         # Verify a specific package
 rpm -Va                             # Verify all installed packages
 rpm -K package.rpm                  # Check .rpm GPG signature
 ```
+
+---
+
+### Flatpak
+
+Flatpak is available in the RHEL AppStream repo. It allows installing sandboxed applications independent of the system RPM stack.
+
+```bash
+sudo dnf install flatpak            # Install Flatpak (available in AppStream — no EPEL needed)
+sudo systemctl restart flatpak-system-helper   # Restart helper service if needed
+
+# Remotes — package sources for Flatpak:
+flatpak remotes                     # List configured remotes
+flatpak remote-add --if-not-exists rhel \
+  oci+https://registry.access.redhat.com/   # Add the official RHEL Flatpak remote (requires subscription)
+flatpak remote-ls rhel              # List apps available in the rhel remote
+flatpak remote-delete rhel          # Remove a remote
+
+# Installing and managing apps:
+flatpak search <appname>            # Search available apps across all remotes
+flatpak install rhel org.gnome.Calculator   # Install an app from the rhel remote
+flatpak uninstall org.gnome.Calculator      # Remove an app
+flatpak update                      # Update all installed Flatpak apps
+
+# Running and listing:
+flatpak run org.gnome.Calculator    # Run an installed Flatpak app
+flatpak list                        # List all installed Flatpak apps
+flatpak list --app                  # Apps only (exclude runtimes)
+```
+
+> ⚠️ On RHEL, the supported Flatpak remote is `rhel` (Red Hat registry). The `fedora` remote is Fedora-specific and not supported on RHEL.
 
 ---
 
