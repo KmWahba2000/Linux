@@ -1042,6 +1042,7 @@ sudo dnf install nginx                      # Install a package
 sudo dnf remove nginx                       # Remove a package
 sudo dnf autoremove                         # Remove unneeded dependencies
 sudo dnf search nginx                       # Search available packages
+sudo dnf search all 'web server'            # Search by package's detail
 dnf info nginx                              # Package details
 sudo dnf check                              # Check for RPM database problems
 
