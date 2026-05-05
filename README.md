@@ -112,38 +112,6 @@ rmdir pages                             # Delete an EMPTY directory only
 
 ---
 
-### Getting Help — `man` / `info` / `--help`
-
-```bash
-man ls                  # Full manual page for a command
-man 5 passwd            # Section 5 = file formats — explains /etc/passwd structure
-man -k keyword          # Search all man page names and descriptions (same as apropos)
-apropos firewall        # Find man pages related to a keyword
-whatis ls               # One-line description of a command
-
-info coreutils          # GNU info pages — more detailed than man for some tools
-
-ls --help               # Inline help (quick flags reference)
-dnf --help              # Most commands support --help
-```
-
-**Man page sections:**
-
-| Section | Covers |
-|---------|--------|
-| 1 | User commands (`ls`, `cp`, `grep`) |
-| 5 | File formats and config files (`passwd`, `fstab`, `crontab`) |
-| 7 | Miscellaneous (conventions, protocols) |
-| 8 | System admin commands (`mount`, `useradd`, `fdisk`) |
-
-```bash
-# When a name exists in multiple sections, specify which one:
-man 1 passwd            # The passwd command
-man 5 passwd            # The /etc/passwd file format
-```
-
----
-
 ## 2. Text File Operations
 
 ### Viewing File Content
@@ -329,7 +297,7 @@ sed '/pattern/d' file.txt               # Delete lines matching pattern
 | `g` | Global: replace all matches on each line |
 | `i` | Case-insensitive match |
 
-> `-i` is a **`sed` command-line option** (not a substitution flag): it edits the file in place instead of printing to stdout. Use as `sed -i 's/old/new/g' file.txt`.
+> `-i` is a **`sed` command-line option** (not a substitution flag): it edits the file in place instead of printing to stdout.
 
 ---
 
@@ -650,7 +618,7 @@ sudo userdel -f username        # Force delete even if user is currently logged 
 ```bash
 sudo groupadd -g 2500 developers        # Create group with a specific GID
 sudo groupmod -n devteam developers     # Rename group
-sudo groupmod -g 5000 devteam          # Change GID
+sudo groupmod -g 5000 devteam           # Change GID
 sudo groupdel devteam                   # Delete group
 
 sudo usermod -aG audio,video username   # Add user to multiple groups
@@ -663,10 +631,10 @@ sudo gpasswd -d username wheel          # Remove user from group
 
 ```bash
 sudo chage -l username                  # Show password aging details
-sudo chage -m 7 -M 90 username         # Min 7 days, max 90 days before change required
-sudo chage -W 14 username              # Warn 14 days before password expires
-sudo chage -E 2027-12-31 username      # Account expires on this date
-sudo chage -M 99999 username           # Effectively disable password expiry
+sudo chage -m 7 -M 90 username          # Min 7 days, max 90 days before change required
+sudo chage -W 14 username               # Warn 14 days before password expires
+sudo chage -E 2027-12-31 username       # Account expires on this date
+sudo chage -M 99999 username            # Effectively disable password expiry
 ```
 
 ---
@@ -732,7 +700,8 @@ sudo vi /etc/hosts                      # Add: 127.0.0.1    my-host
 ### Understanding Permission Notation
 
 ```bash
-ls -al      # Long listing showing permissions
+ls -al      # Long listing showing permissions for all files including hidden
+ls -ld /data    # Show permissions of a specific directory itself (not its contents)
 ```
 
 ```
@@ -743,6 +712,9 @@ ls -al      # Long listing showing permissions
 │ └─────────────── Owner:  rwx (read + write + execute)
 └───────────────── File type: - (file), d (dir), l (symlink)
 ```
+
+> Use `ls -ld /data` (lowercase L + d flag) to inspect the directory's own permissions
+> without listing its contents. The `d` flag means "directory itself".
 
 ---
 
@@ -834,8 +806,130 @@ sudo mkdir /shared
 sudo chown root:developers /shared
 sudo chmod 2775 /shared             # or: chmod g+s /shared
 ls -ld /shared
-# → drwxr-sr-x  (s in group position = SetGID active)
+# → drwxrwsr-x  (s in group position = SetGID active)
 ```
+
+---
+
+### ACL — Access Control Lists (`getfacl` / `setfacl`)
+
+ACLs extend standard Unix permissions, allowing fine-grained access control for
+individual users or groups beyond the owner/group/others model.
+
+> `getfacl` and `setfacl` are part of the `acl` package — pre-installed on RHEL 8/9.
+> If missing: `sudo dnf install acl`
+
+#### The `+` sign in `ls -l` output
+
+When a file or directory has an ACL applied, `ls -l` appends a **`+`** at the end
+of the permission string:
+
+```
+drwxr-xr-x. 2 root root 6 Jan  5 10:00 /folder     ← no ACL
+drwxr-xr-x+ 2 root root 6 Jan  5 10:00 /folder     ← ACL is set ('+' indicator)
+```
+
+The `.` (dot) indicates an SELinux context is present. The `+` indicates an ACL exists.
+Both can appear together: `drwxr-xr-x+`
+
+---
+
+#### `getfacl` — View ACL
+
+```bash
+getfacl /folder             # Show all ACL entries for a directory
+getfacl file.txt            # Show ACL for a file
+getfacl -R /folder          # Recursive: show ACLs for all items inside
+```
+
+**Example output:**
+```
+# file: folder
+# owner: root
+# group: root
+user::rwx
+group::r-x
+group:mody:r-x          ← explicit ACL entry for group 'mody'
+mask::r-x
+other::r-x
+```
+
+---
+
+#### `setfacl` — Set ACL
+
+```bash
+# Grant a specific group read+execute access to /folder:
+setfacl -m g:mody:rx /folder
+```
+
+**Before:**
+```
+$ ls -ld /folder
+drwxr-xr-x. 2 root root 6 Jan  5 10:00 /folder
+```
+
+**After:**
+```
+$ ls -ld /folder
+drwxr-xr-x+ 2 root root 6 Jan  5 10:00 /folder
+                    ↑
+              '+' confirms ACL is now active
+```
+
+**Verify with getfacl:**
+```
+$ getfacl /folder
+# file: folder
+# owner: root
+# group: root
+user::rwx
+group::r-x
+group:mody:r-x          ← mody group now has read+execute
+mask::r-x
+other::r-x
+```
+
+---
+
+#### Common `setfacl` Commands
+
+```bash
+# --- Grant access ---
+setfacl -m u:samar:rwx /folder          # Grant user 'samar' full rwx
+setfacl -m g:mody:rx /folder            # Grant group 'mody' read+execute
+setfacl -m u:samar:r-- file.txt         # Grant user 'samar' read-only on a file
+
+# --- Recursive (applies to all existing files inside) ---
+setfacl -R -m u:samar:rwx /folder       # Recursive: set ACL on /folder and all contents
+
+# --- Default ACL (inherited by NEW files created inside the directory) ---
+setfacl -m d:u:samar:rwx /folder        # New files inside /folder will inherit this ACL
+setfacl -m d:g:mody:rx /folder          # New files inherit read+execute for group 'mody'
+
+# --- Remove a specific ACL entry ---
+setfacl -x u:samar /folder              # Remove user 'samar' ACL entry
+setfacl -x g:mody /folder              # Remove group 'mody' ACL entry
+
+# --- Remove ALL ACLs from a file/directory ---
+setfacl -b /folder                      # Wipe all ACL entries (back to standard permissions)
+setfacl -b file.txt
+
+# --- Copy ACL from one path to another ---
+getfacl /folder | setfacl --set-file=- /other_folder
+```
+
+**ACL permission reference:**
+
+| Symbol | Permission |
+|--------|-----------|
+| `r` | Read |
+| `w` | Write |
+| `x` | Execute |
+| `rwx` | Full access |
+| `rx` | Read + execute (common for directories) |
+| `r--` | Read-only |
+| `---` | No access |
 
 ---
 
@@ -873,7 +967,7 @@ pgrep -f nginx                          # Match against full command line
 
 ```bash
 top                             # Interactive monitor (sorted by CPU by default)
-top -u username -d 1 -i -c      # Filter by user, 1s refresh, hide idle, show full commands
+top -u username -d 1 -c         # Filter by user, 1s refresh, show full commands
 
 # htop — enhanced top (requires EPEL; see Section 13 for EPEL setup):
 sudo dnf install htop
@@ -916,9 +1010,9 @@ kill -9 1234                    # Send SIGKILL (force kill, no cleanup)
 pkill -SIGTERM nginx            # Kill by process name (graceful)
 pkill -9 nginx                  # Force kill by name
 
-# killall is available via the psmisc package (may not be pre-installed):
-# sudo dnf install psmisc
-# killall nginx
+# killall is available via the psmisc package:
+sudo dnf install psmisc
+killall nginx
 ```
 
 **Common signals:**
@@ -1027,10 +1121,8 @@ tar -tvzf file.tar.gz
 ### Other Archive Formats
 
 ```bash
-# unzip is in RHEL AppStream:
-sudo dnf install unzip
-# zip is in RHEL AppStream:
-sudo dnf install zip
+# unzip and zip are in RHEL AppStream:
+sudo dnf install unzip zip
 
 # p7zip requires EPEL (see Section 13 for EPEL setup):
 sudo dnf install p7zip p7zip-plugins
@@ -1073,28 +1165,25 @@ sudo dnf upgrade --refresh                  # Refresh metadata and upgrade all p
 sudo dnf install nginx                      # Install a package
 sudo dnf remove nginx                       # Remove a package
 sudo dnf autoremove                         # Remove unneeded dependencies
-sudo dnf search nginx                       # Search available packages
-dnf info nginx                              # Package details
+
+# Searching packages:
+sudo dnf search nginx                       # Search by name and summary
+sudo dnf search all 'nginx'                 # Deep search: name + summary + description (broader results)
+
+dnf info nginx                              # Package details (version, size, repo, description)
 sudo dnf check                              # Check for RPM database problems
 
-# Package groups:
-dnf group list                              # List all available package groups
-dnf group list --installed                  # List only installed groups
-dnf group info 'Development Tools'          # Show packages inside a group
-sudo dnf group install 'Development Tools'  # Install all packages in a group
-sudo dnf group remove  'Development Tools'  # Remove a group
-
-# Transaction history:
-dnf history                                 # Full transaction history (newest first)
-dnf history info 5                          # Details of transaction #5
-sudo dnf history undo 5                     # Roll back transaction #5
-sudo dnf history redo 5                     # Re-apply transaction #5
-
-# Security upgrades:
-sudo dnf upgrade --security                 # Apply security fixes only
-sudo dnf upgrade --sec-severity=Important   # Apply only Important (or Critical) severity fixes
-sudo dnf upgrade --sec-severity=Critical    # Apply only Critical severity fixes
-dnf updateinfo list security                # List available security advisories
+# Repository management:
+dnf repolist                                # List all ENABLED repositories
+dnf repolist all                            # List ALL repos (enabled and disabled)
+dnf repolist --enabled                      # Explicitly list enabled repos only
+dnf repolist --disabled                     # List disabled repos only
+ls /etc/yum.repos.d/                        # List configured repo files
+sudo vi /etc/yum.repos.d/<repo-name>.repo   # Edit a repo file manually
+sudo dnf install dnf-plugins-core           # Required for config-manager plugin
+sudo dnf config-manager --add-repo https://example.repo/pkg.repo  # Add a repo
+sudo dnf config-manager --disable example-repo                    # Disable a repo
+sudo dnf config-manager --enable example-repo                     # Enable a repo
 
 # Kernel version management:
 sudo dnf mark install kernel-core-6.8.0-31.el9.x86_64   # Mark as user-installed (protects from autoremove)
@@ -1102,6 +1191,32 @@ sudo dnf install python3-dnf-plugin-versionlock          # Install versionlock p
 sudo dnf versionlock add kernel                          # Lock kernel version
 sudo dnf versionlock delete kernel                       # Unlock
 dnf list kernel                                          # List available kernel packages
+```
+
+---
+
+### Flatpak
+
+> Flatpak is available in RHEL 8/9 AppStream. It is an optional package delivery system
+> for sandboxed desktop applications.
+
+```bash
+sudo dnf install flatpak                                            # Install Flatpak
+sudo flatpak remote-add --if-not-exists flathub \
+    https://flathub.org/repo/flathub.flatpakrepo                   # Add Flathub remote
+
+flatpak remote-ls                                                   # List all available apps from all remotes
+flatpak remote-ls flathub                                           # List apps from the Flathub remote only
+flatpak remote-ls --app flathub                                     # List only apps (exclude runtimes)
+
+flatpak remote-modify --disable flathub                             # Disable Flathub remote (stops fetching updates)
+flatpak remote-modify --enable flathub                              # Re-enable Flathub remote
+
+flatpak remotes                                                     # List all configured remotes and their status
+flatpak list                                                        # List installed Flatpak apps
+flatpak install flathub org.gimp.GIMP                              # Install an app from Flathub
+flatpak uninstall org.gimp.GIMP                                    # Remove an installed app
+flatpak update                                                      # Update all installed Flatpak apps
 ```
 
 ---
@@ -1120,166 +1235,6 @@ rpm -K package.rpm                  # Check .rpm GPG signature
 
 ---
 
-### Flatpak
-
-Flatpak is available in the RHEL AppStream repo. It allows installing sandboxed applications independent of the system RPM stack.
-
-```bash
-sudo dnf install flatpak            # Install Flatpak (available in AppStream — no EPEL needed)
-sudo systemctl restart flatpak-system-helper   # Restart helper service if needed
-
-# Remotes — package sources for Flatpak:
-flatpak remotes                     # List configured remotes
-flatpak remote-add --if-not-exists rhel \
-  oci+https://registry.access.redhat.com/   # Add the official RHEL Flatpak remote (requires subscription)
-flatpak remote-ls rhel              # List apps available in the rhel remote
-flatpak remote-delete rhel          # Remove a remote
-
-# Installing and managing apps:
-flatpak search <appname>            # Search available apps across all remotes
-flatpak install rhel org.gnome.Calculator   # Install an app from the rhel remote
-flatpak uninstall org.gnome.Calculator      # Remove an app
-flatpak update                      # Update all installed Flatpak apps
-
-# Running and listing:
-flatpak run org.gnome.Calculator    # Run an installed Flatpak app
-flatpak list                        # List all installed Flatpak apps
-flatpak list --app                  # Apps only (exclude runtimes)
-```
-
-> ⚠️ On RHEL, the supported Flatpak remote is `rhel` (Red Hat registry). The `fedora` remote is Fedora-specific and not supported on RHEL.
-
----
-
-### Repository Management
-
-#### Repo File Location & Structure
-
-All repos are defined in `/etc/yum.repos.d/` as `.repo` files.
-
-> ⚠️ Never edit `/etc/yum.repos.d/redhat.repo` — it is owned and overwritten by `subscription-manager`.
-
-```bash
-ls /etc/yum.repos.d/        # List all repo files on disk
-cat /etc/yum.repos.d/epel.repo          # Inspect a specific repo file
-```
-
-**`.repo` file — key directives:**
-
-```ini
-[nginx-stable]              # Repo ID — used in dnf commands; must be unique, no spaces
-name=nginx stable repo      # Human-readable label shown in dnf output
-baseurl=https://nginx.org/packages/rhel/$releasever/$basearch/
-                            # URL pointing to the repo ($releasever = 8 or 9, $basearch = x86_64)
-enabled=1                   # 1 = active, 0 = dnf ignores this repo
-gpgcheck=1                  # 1 = verify package GPG signatures (always keep this on)
-gpgkey=https://nginx.org/keys/nginx_signing.key
-                            # URL or file:/// path to the repo's GPG public key
-skip_if_unavailable=1       # Don't abort dnf if this repo is temporarily unreachable
-```
-
----
-
-#### Listing Repos
-
-```bash
-dnf repolist                # All enabled repos
-dnf repolist --all          # All repos — enabled and disabled
-dnf repolist --disabled     # Disabled repos only
-dnf repoinfo nginx-stable   # Full details for a specific repo (URL, GPG, package count)
-```
-
----
-
-#### Adding a Repo
-
-**Method 1 — Manual (most control, recommended):**
-```bash
-sudo vi /etc/yum.repos.d/nginx.repo
-```
-```ini
-[nginx-stable]
-name=nginx stable repo
-baseurl=https://nginx.org/packages/rhel/$releasever/$basearch/
-enabled=1
-gpgcheck=1
-gpgkey=https://nginx.org/keys/nginx_signing.key
-```
-
-**Method 2 — `dnf config-manager` (quick but sets `gpgcheck=0` — fix it after):**
-```bash
-sudo dnf install dnf-plugins-core
-sudo dnf config-manager --add-repo https://nginx.org/packages/rhel/9/nginx.repo
-sudo vi /etc/yum.repos.d/nginx.repo     # ⚠️ Set gpgcheck=1 and add gpgkey=
-```
-
-**Method 3 — Repo RPM (drops the `.repo` file and imports the GPG key automatically):**
-```bash
-sudo dnf install https://example.com/repo-release.rpm
-```
-
----
-
-#### Enabling, Disabling & Removing
-
-```bash
-# Permanent (edits the enabled= field in the .repo file):
-sudo dnf config-manager --enable nginx-stable
-sudo dnf config-manager --disable nginx-stable
-
-# Temporary — affects only the current dnf command:
-sudo dnf install nginx --enablerepo=nginx-stable        # Enable one repo for this run
-sudo dnf upgrade --disablerepo=epel                     # Skip one repo for this run
-sudo dnf upgrade --disablerepo="*" --enablerepo=nginx-stable  # Use ONLY one repo
-
-# Remove a repo entirely:
-sudo rm /etc/yum.repos.d/nginx.repo
-sudo dnf clean all
-```
-
----
-
-#### GPG Keys
-
-```bash
-sudo rpm --import https://nginx.org/keys/nginx_signing.key   # Import from URL
-sudo rpm --import /path/to/key.gpg                           # Import from file
-rpm -qa gpg-pubkey*                                          # List all imported keys
-```
-
-> Always set `gpgcheck=1` — never leave it as `0` in production.
-
----
-
-#### RHEL Subscription Repos
-
-```bash
-sudo subscription-manager repos --list            # All repos available to your subscription
-sudo subscription-manager repos --list-enabled    # Currently enabled only
-
-sudo subscription-manager repos --enable  rhel-9-for-x86_64-appstream-rpms
-sudo subscription-manager repos --disable rhel-9-for-x86_64-appstream-rpms
-
-# Common RHEL 9 repo IDs:
-# rhel-9-for-x86_64-baseos-rpms                    → Core OS packages
-# rhel-9-for-x86_64-appstream-rpms                 → Applications and runtimes
-# codeready-builder-for-rhel-9-x86_64-rpms         → Dev tools (required for EPEL)
-
-sudo subscription-manager refresh                 # Sync subscription data from Red Hat
-```
-
----
-
-#### Cache Management
-
-```bash
-sudo dnf clean all          # Wipe all cached metadata and packages
-sudo dnf clean metadata     # Wipe only repo metadata (repodata)
-sudo dnf makecache          # Re-download and cache repo metadata now
-```
-
----
-
 ### System Info
 
 ```bash
@@ -1292,7 +1247,7 @@ hostnamectl                 # System info: OS, hostname, kernel, architecture
 timedatectl                                 # Show current time, timezone, NTP status
 sudo timedatectl set-timezone Region/City   # Set timezone (e.g. America/New_York)
 timedatectl list-timezones                  # List all available timezones
-date +%d/%m/%Y                             # Date in day/month/year format
+date +%d/%m/%Y                              # Date in day/month/year format
 ```
 
 ---
@@ -1434,7 +1389,6 @@ journalctl -u nginx                     # Logs for nginx service
 journalctl -u nginx -f                  # Follow nginx logs live
 journalctl -u nginx -r                  # Reverse (newest first)
 journalctl -p err                       # Error level and above only
-journalctl -p err..warning              # Range: err(3) through warning(4)
 
 journalctl --since "today"
 journalctl --since "2 hours ago"
@@ -1566,7 +1520,7 @@ sudo parted /dev/sdb                    # Open interactive session on a specific
 sudo mkfs.xfs /dev/sdb1                 # Format as XFS    (default on RHEL; xfsprogs included)
 sudo mkfs.ext4 /dev/sdb1               # Format as ext4   (e2fsprogs included)
 sudo mkfs.vfat /dev/sdb1               # Format as FAT32  (requires: sudo dnf install dosfstools)
-sudo mkfs.exfat /dev/sdb1              # Format as exFAT  (RHEL 8: requires EPEL — sudo dnf install exfatprogs; RHEL 9: in AppStream)
+sudo mkfs.exfat /dev/sdb1              # Format as exFAT  (RHEL 8: EPEL — sudo dnf install exfatprogs; RHEL 9: AppStream)
 
 # Label a partition:
 sudo xfs_admin -L mydata /dev/sdb1      # Label XFS filesystem
@@ -1889,26 +1843,109 @@ cat /etc/anacrontab     # Main anacron config
 
 ## 18. Networking
 
-### IP Commands
+### Interface Overview
 
 ```bash
-ip addr show                            # Show all interfaces and IPs
-ip -c a                                 # Show with color
-ip link show                            # Show link-layer info (MAC, state, MTU)
+ip addr show                            # Show ALL interfaces with IP addresses
+ip -br addr show                        # Brief/compact format: one line per interface
+ip -c addr show                         # Colorized output (full detail)
+
+ip addr show ens33                      # Show a SPECIFIC interface by name
+ip -br addr show ens33                  # Brief view of one specific interface
+```
+
+**Example output of `ip -br addr show`:**
+```
+lo               UNKNOWN        127.0.0.1/8 ::1/128
+ens33            UP             192.168.1.100/24 fe80::1a2b:3c4d:5e6f:7a8b/64
+ens37            DOWN
+```
+
+---
+
+### Link Layer & Interface State
+
+```bash
+ip link show                            # Show link-layer info for ALL interfaces (MAC, state, MTU)
+ip link show ens33                      # Link-layer info for a SPECIFIC interface
+ip -br link show                        # Brief: state + MAC per interface
+
 sudo ip link set dev ens33 up           # Bring interface up
 sudo ip link set dev ens33 down         # Bring interface down
+sudo ip link set dev ens33 mtu 9000     # Set jumbo frames MTU
+```
 
-sudo ip addr add 192.168.1.10/24 dev ens33   # Add temporary IP
-sudo ip addr del 192.168.1.10/24 dev ens33   # Remove IP
+---
 
-ip route show                           # Show routing table
-ip -c r                                 # Routing table with color
-ip route get 8.8.8.8                    # Which route would be used for this IP
-sudo ip route add default via 192.168.1.1    # Set default gateway (temporary)
+### IP Address Management
 
+```bash
+sudo ip addr add 192.168.1.10/24 dev ens33   # Add a temporary IP (lost on reboot)
+sudo ip addr del 192.168.1.10/24 dev ens33   # Remove an IP address
+sudo ip addr flush dev ens33                 # Remove ALL addresses from an interface
+```
+
+---
+
+### Routing
+
+```bash
+ip route show                           # Show full routing table
+ip -c route show                        # Routing table with color
+ip -br route show                       # Brief routing table
+ip route get 8.8.8.8                    # Which route would be used to reach this IP
+sudo ip route add default via 192.168.1.1    # Add default gateway (temporary)
+sudo ip route del default via 192.168.1.1    # Remove a default gateway entry
+sudo ip route add 10.0.0.0/8 via 192.168.1.254 dev ens33  # Add a static route
+```
+
+---
+
+### Sockets & Listening Ports
+
+```bash
 ss -4nap                                # All IPv4 sockets with process info
 ss -tulnp                               # TCP/UDP listening ports with PIDs
 ss -s                                   # Socket summary statistics
+ss -tnp state established               # Only established TCP connections
+```
+
+---
+
+### NetworkManager — `nmcli`
+
+```bash
+# Overview:
+nmcli device status                                         # List interfaces and connection state
+nmcli connection show                                       # List all connection profiles
+
+# Inspect a specific interface or connection:
+nmcli device show ens33                                     # Full details for a specific interface
+                                                            # (IP, MAC, DNS, gateway, state)
+nmcli con show ens33                                        # All settings for a named connection profile
+
+# Configure a static IP:
+sudo nmcli con modify ens33 ipv4.addresses 192.168.1.100/24
+sudo nmcli con modify ens33 ipv4.gateway 192.168.1.1
+sudo nmcli con modify ens33 ipv4.dns "8.8.8.8 1.1.1.1"
+sudo nmcli con modify ens33 ipv4.method manual              # Disable DHCP, use static IP
+sudo nmcli con down ens33 && sudo nmcli con up ens33        # Apply changes
+
+# Switch back to DHCP:
+sudo nmcli con modify ens33 ipv4.method auto
+sudo nmcli con modify ens33 ipv4.addresses ""
+sudo nmcli con modify ens33 ipv4.gateway ""
+sudo nmcli con down ens33 && sudo nmcli con up ens33
+
+# Connect / disconnect a device:
+sudo nmcli device connect ens33                             # Connect interface
+sudo nmcli device disconnect ens33                          # Disconnect interface
+
+# Reload connection from disk:
+sudo nmcli con reload
+
+nmtui                                                       # Text-based UI — easier alternative to nmcli
+journalctl -u NetworkManager -b                             # NetworkManager logs for current boot
 ```
 
 ---
@@ -1958,24 +1995,6 @@ host google.com                     # A + MX records in one shot
 host 8.8.8.8                        # Reverse lookup
 
 cat /etc/resolv.conf                # View configured DNS servers
-```
-
----
-
-### Static IP — nmcli
-
-```bash
-nmcli device status                                         # List interfaces and their state
-nmcli connection show                                       # List all connection profiles
-
-sudo nmcli con modify ens33 ipv4.addresses 192.168.1.100/24
-sudo nmcli con modify ens33 ipv4.gateway 192.168.1.1
-sudo nmcli con modify ens33 ipv4.dns "8.8.8.8 1.1.1.1"
-sudo nmcli con modify ens33 ipv4.method manual              # Disable DHCP, use static IP
-sudo nmcli con down ens33 && sudo nmcli con up ens33        # Apply changes
-
-nmtui                                                       # Text-based UI — easier alternative to nmcli
-journalctl -u NetworkManager -b                             # NetworkManager logs for current boot
 ```
 
 ---
@@ -2073,7 +2092,7 @@ sudo dnf install nmap-ncat
 nc -zv 192.168.1.1 22               # Check if SSH port is open
 nc -zv 192.168.1.1 80               # Check if HTTP port is open
 
-# Quick port check in a script (exits 0 if open, 1 if closed):
+# Quick port check in a script:
 nc -z -w 3 192.168.1.1 22 && echo "SSH open" || echo "SSH closed"
 # -w 3 = timeout after 3 seconds
 
@@ -2214,8 +2233,6 @@ ip neigh show                       # ARP table: maps IP addresses → MAC addre
 ip neigh show dev ens33             # For a specific interface only
 ip neigh flush all                  # Clear entire ARP cache
 ip neigh add 192.168.1.50 lladdr aa:bb:cc:dd:ee:ff dev ens33   # Add static ARP entry
-
-# Prefer ip neigh (iproute2 — always available) over legacy arp (net-tools).
 ```
 
 ---
@@ -2271,7 +2288,7 @@ sudo tcpdump -i ens33 port 80 or port 443             # All web traffic
 ### NIC Information — `ethtool`
 
 ```bash
-# ethtool is in RHEL BaseOS and is usually pre-installed; install if missing:
+# ethtool is in RHEL BaseOS; install if missing:
 sudo dnf install ethtool
 
 ethtool ens33               # NIC speed, duplex, link status, auto-negotiation
