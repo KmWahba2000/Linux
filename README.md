@@ -1914,64 +1914,202 @@ ss -tnp state established               # Only established TCP connections
 
 ### NetworkManager — `nmcli`
 
+#### 1. Status & Inspection
+
 ```bash
-# Overview:
-nmcli device status                                         # List interfaces and connection state
-nmcli connection show                                       # List all connection profiles
+nmcli device status                     # List all interfaces: name, type, state, connection profile
+nmcli connection show                   # List all saved connection profiles
+nmcli device show ens33                 # Full details for a specific interface (IP, MAC, DNS, gateway, state)
+nmcli con show ens33                    # All settings stored in a named connection profile
+```
 
-# Inspect a specific interface or connection:
-nmcli device show ens33                                     # Full details for a specific interface
-                                                            # (IP, MAC, DNS, gateway, state)
-nmcli con show ens33                                        # All settings for a named connection profile
+---
 
-# Configure a static IP:
+#### 2. Create a New Connection Profile
+
+> `nmcli con add` creates a new profile from scratch. Use this when no profile exists for the interface.
+
+**Static IP — all settings in one command (recommended):**
+```bash
+sudo nmcli con add \
+    type ethernet \
+    ifname ens33 \
+    con-name "static-ens33" \
+    ipv4.addresses 192.168.1.100/24 \
+    ipv4.gateway 192.168.1.1 \
+    ipv4.dns "8.8.8.8 1.1.1.1" \
+    ipv4.method manual
+```
+
+**DHCP profile (automatic IP):**
+```bash
+sudo nmcli con add \
+    type ethernet \
+    ifname ens33 \
+    con-name "dhcp-ens33" \
+    ipv4.method auto
+```
+
+**Create and bring up immediately:**
+```bash
+sudo nmcli con add type ethernet ifname ens33 con-name "static-ens33" \
+    ipv4.addresses 192.168.1.100/24 \
+    ipv4.gateway 192.168.1.1 \
+    ipv4.dns "8.8.8.8 1.1.1.1" \
+    ipv4.method manual \
+    && sudo nmcli con up "static-ens33"
+```
+
+| Key parameter | Purpose |
+|---------------|---------|
+| `type ethernet` | Connection type (also: `wifi`, `bridge`, `bond`, `vlan`) |
+| `ifname ens33` | Physical interface to bind the profile to |
+| `con-name "name"` | Logical profile name (used in all future `nmcli con` commands) |
+| `ipv4.method manual` | Static IP — disables DHCP |
+| `ipv4.method auto` | DHCP — let the network assign the IP |
+
+---
+
+#### 3. Configure — IP, Gateway, DNS
+
+> Use `nmcli con modify` to set or update individual parameters on an **existing** profile.
+> Always apply with `con down / con up` after modifying.
+
+**Set a static IP address:**
+```bash
 sudo nmcli con modify ens33 ipv4.addresses 192.168.1.100/24
+```
+
+**Set the default gateway:**
+```bash
 sudo nmcli con modify ens33 ipv4.gateway 192.168.1.1
-sudo nmcli con modify ens33 ipv4.dns "8.8.8.8 1.1.1.1"
-sudo nmcli con modify ens33 ipv4.method manual              # Disable DHCP, use static IP
-sudo nmcli con down ens33 && sudo nmcli con up ens33        # Apply changes
+```
 
-# Switch back to DHCP:
+**Set DNS servers:**
+```bash
+sudo nmcli con modify ens33 ipv4.dns "8.8.8.8 1.1.1.1"     # Primary + secondary
+sudo nmcli con modify ens33 ipv4.dns "8.8.8.8"              # Primary only
+sudo nmcli con modify ens33 +ipv4.dns "1.1.1.1"             # Append an additional DNS server
+sudo nmcli con modify ens33 -ipv4.dns "1.1.1.1"             # Remove a specific DNS server
+```
+
+**Switch to static (disable DHCP):**
+```bash
+sudo nmcli con modify ens33 ipv4.method manual
+```
+
+**Switch back to DHCP (clear static settings):**
+```bash
 sudo nmcli con modify ens33 ipv4.method auto
-sudo nmcli con modify ens33 ipv4.addresses ""
-sudo nmcli con modify ens33 ipv4.gateway ""
+sudo nmcli con modify ens33 ipv4.addresses ""               # Clear static IP
+sudo nmcli con modify ens33 ipv4.gateway ""                 # Clear gateway
+sudo nmcli con modify ens33 ipv4.dns ""                     # Clear DNS entries
+```
+
+**Apply all changes:**
+```bash
 sudo nmcli con down ens33 && sudo nmcli con up ens33
+```
 
-# Connect / disconnect a device:
-sudo nmcli device connect ens33                             # Connect interface
-sudo nmcli device disconnect ens33                          # Disconnect interface
+---
 
-# Reload connection from disk:
+#### 4. Modify & Adjust
+
+**Rename a connection profile:**
+```bash
+sudo nmcli con modify ens33 connection.id "new-profile-name"
+```
+
+**Rebind a profile to a different interface:**
+```bash
+sudo nmcli con modify ens33 connection.interface-name ens37
+```
+
+**Add a secondary IP address (multi-homing):**
+```bash
+sudo nmcli con modify ens33 +ipv4.addresses 10.0.0.50/24    # '+' appends, does not replace
+```
+
+**Remove a specific IP address:**
+```bash
+sudo nmcli con modify ens33 -ipv4.addresses 10.0.0.50/24    # '-' removes that one entry
+```
+
+**Change MTU:**
+```bash
+sudo nmcli con modify ens33 ethernet.mtu 9000               # Jumbo frames
+sudo nmcli con modify ens33 ethernet.mtu 1500               # Reset to standard
+```
+
+**Delete a connection profile entirely:**
+```bash
+sudo nmcli con delete ens33
+sudo nmcli con delete "static-ens33"                        # By profile name
+```
+
+**Reload all connection files from disk (after manual edits to /etc/NetworkManager/system-connections/):**
+```bash
 sudo nmcli con reload
+```
 
-# --- Autoconnect ---
-# Controls whether NetworkManager brings up a connection automatically on boot
-# or whenever the interface becomes available (e.g. cable plugged in, VM start).
+---
 
-sudo nmcli con modify ens33 connection.autoconnect yes      # Enable autoconnect for this profile (default: yes)
-sudo nmcli con modify ens33 connection.autoconnect no       # Disable autoconnect (profile won't come up automatically)
+#### 5. Autoconnect Tweaks
 
-# Priority — when multiple profiles compete for the same device, the highest wins:
-sudo nmcli con modify ens33 connection.autoconnect-priority 10    # Higher number = higher priority (default: 0)
-sudo nmcli con modify ens33 connection.autoconnect-priority 0     # Reset to default priority
+> Controls whether and how NetworkManager automatically activates a connection
+> on boot or when the interface becomes available (cable plugged in, VM start, etc.).
 
-# Retries — how many times NM retries before marking autoconnect as failed:
-sudo nmcli con modify ens33 connection.autoconnect-retries 3      # Retry 3 times, then stop (default: -1 = infinite)
-sudo nmcli con modify ens33 connection.autoconnect-retries -1     # Infinite retries (never give up)
-sudo nmcli con modify ens33 connection.autoconnect-retries 0      # Try once and never retry on failure
+**Enable / disable autoconnect for a profile:**
+```bash
+sudo nmcli con modify ens33 connection.autoconnect yes      # Bring up automatically (default)
+sudo nmcli con modify ens33 connection.autoconnect no       # Never bring up automatically
+```
 
-# Device-level autoconnect (affects ALL profiles on the device, not just one profile):
-sudo nmcli device set ens33 autoconnect yes                 # Allow NM to autoconnect any profile on ens33
-sudo nmcli device set ens33 autoconnect no                  # Block NM from auto-activating ens33 entirely
+**Priority — which profile wins when multiple compete for the same device:**
+```bash
+sudo nmcli con modify ens33 connection.autoconnect-priority 10   # Higher = preferred (default: 0)
+sudo nmcli con modify ens33 connection.autoconnect-priority 0    # Reset to default priority
+```
 
-# Verify autoconnect settings for a connection profile:
+**Retries — how many times NM retries a failed activation before giving up:**
+```bash
+sudo nmcli con modify ens33 connection.autoconnect-retries 3     # Try 3 times, then stop
+sudo nmcli con modify ens33 connection.autoconnect-retries -1    # Infinite retries (default)
+sudo nmcli con modify ens33 connection.autoconnect-retries 0     # One attempt only, no retries
+```
+
+**Device-level autoconnect (blocks/allows ALL profiles on the device):**
+```bash
+sudo nmcli device set ens33 autoconnect yes                 # Allow NM to auto-activate ens33
+sudo nmcli device set ens33 autoconnect no                  # Block NM from touching ens33 at all
+```
+
+**Verify current autoconnect settings:**
+```bash
 nmcli con show ens33 | grep -i autoconnect
+```
 
-# Apply after any modify:
-sudo nmcli con down ens33 && sudo nmcli con up ens33
+---
 
-nmtui                                                       # Text-based UI — easier alternative to nmcli
+#### 6. Activate & Deactivate
+
+```bash
+sudo nmcli con up ens33                                     # Bring connection profile up
+sudo nmcli con up "static-ens33"                            # Bring up by profile name
+sudo nmcli con down ens33                                   # Bring connection profile down
+
+sudo nmcli device connect ens33                             # Connect device (NM picks best profile)
+sudo nmcli device disconnect ens33                          # Disconnect device
+```
+
+---
+
+#### 7. Tools
+
+```bash
+nmtui                                                       # Text-based UI — easier alternative for basic tasks
 journalctl -u NetworkManager -b                             # NetworkManager logs for current boot
+journalctl -u NetworkManager -f                             # Follow NetworkManager logs live
 ```
 
 ---
