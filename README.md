@@ -1944,6 +1944,32 @@ sudo nmcli device disconnect ens33                          # Disconnect interfa
 # Reload connection from disk:
 sudo nmcli con reload
 
+# --- Autoconnect ---
+# Controls whether NetworkManager brings up a connection automatically on boot
+# or whenever the interface becomes available (e.g. cable plugged in, VM start).
+
+sudo nmcli con modify ens33 connection.autoconnect yes      # Enable autoconnect for this profile (default: yes)
+sudo nmcli con modify ens33 connection.autoconnect no       # Disable autoconnect (profile won't come up automatically)
+
+# Priority — when multiple profiles compete for the same device, the highest wins:
+sudo nmcli con modify ens33 connection.autoconnect-priority 10    # Higher number = higher priority (default: 0)
+sudo nmcli con modify ens33 connection.autoconnect-priority 0     # Reset to default priority
+
+# Retries — how many times NM retries before marking autoconnect as failed:
+sudo nmcli con modify ens33 connection.autoconnect-retries 3      # Retry 3 times, then stop (default: -1 = infinite)
+sudo nmcli con modify ens33 connection.autoconnect-retries -1     # Infinite retries (never give up)
+sudo nmcli con modify ens33 connection.autoconnect-retries 0      # Try once and never retry on failure
+
+# Device-level autoconnect (affects ALL profiles on the device, not just one profile):
+sudo nmcli device set ens33 autoconnect yes                 # Allow NM to autoconnect any profile on ens33
+sudo nmcli device set ens33 autoconnect no                  # Block NM from auto-activating ens33 entirely
+
+# Verify autoconnect settings for a connection profile:
+nmcli con show ens33 | grep -i autoconnect
+
+# Apply after any modify:
+sudo nmcli con down ens33 && sudo nmcli con up ens33
+
 nmtui                                                       # Text-based UI — easier alternative to nmcli
 journalctl -u NetworkManager -b                             # NetworkManager logs for current boot
 ```
