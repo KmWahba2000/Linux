@@ -21,7 +21,7 @@
 14. [Boot Process & Systemd](#14-boot-process--systemd)
 15. [Storage — Partitions, Mounts & LVM](#15-storage--partitions-mounts--lvm)
 16. [System Upgrade & Recovery](#16-system-upgrade--recovery)
-17. [Cron Jobs](#17-cron-jobs)
+17. [Cron Jobs — `cron`, `anacron`, `at`](#17-cron-jobs)
 18. [Networking](#18-networking)
 19. [Firewall (firewalld)](#19-firewall-firewalld)
 20. [SELinux](#20-selinux)
@@ -688,19 +688,10 @@ username ALL=(ALL:ALL) NOPASSWD: /usr/bin/dnf
 ### Hostname
 
 ```bash
-hostnamectl                             # Show current hostname and full system info
-hostname                                # Print the short hostname only
-hostname -I                             # Print ALL IP addresses assigned to this host (all interfaces)
-hostname -i                             # Print the primary IP address (DNS-resolved)
-hostname -s                             # Short hostname (same as hostname alone)
-hostname -f                             # Fully Qualified Domain Name (FQDN), e.g. server1.example.com
-
-sudo hostnamectl set-hostname my-host   # Change hostname permanently (takes effect immediately)
+hostnamectl                             # Show current hostname and system info
+sudo hostnamectl set-hostname my-host   # Change hostname (persistent)
 sudo vi /etc/hosts                      # Add: 127.0.0.1    my-host
 ```
-
-> `hostname -I` is the quickest way to check what IPs a machine has without parsing `ip addr show`.
-> Useful over SSH: `ssh servera "hostname -I"` to confirm a remote host's IP without logging in.
 
 ---
 
@@ -1850,6 +1841,121 @@ cat /etc/anacrontab     # Main anacron config
 
 ---
 
+### `at` — One-Time Scheduled Jobs
+
+`at` runs a command **once** at a specific future time.
+Unlike cron (recurring), `at` is for single-shot tasks: run this backup at 2 AM, reboot after 10 minutes, send a report at end of day.
+
+```bash
+# Install if not present:
+sudo dnf install at
+sudo systemctl enable --now atd        # atd daemon must be running
+```
+
+---
+
+#### Scheduling a Job
+
+```bash
+at 14:30                        # Schedule for today at 2:30 PM
+at 14:30 tomorrow               # Tomorrow at 2:30 PM
+at 14:30 July 25                # Specific date at 2:30 PM
+at 14:30 07/25/2027             # Same — MM/DD/YYYY format
+at now + 10 minutes             # 10 minutes from now
+at now + 2 hours                # 2 hours from now
+at now + 3 days                 # 3 days from now
+at midnight                     # Tonight at 00:00
+at noon                         # Today at 12:00
+at teatime                      # Today at 4:00 PM (16:00)
+```
+
+> After typing an `at` command, you land in an interactive prompt (`at>`).
+> Type your commands, then press **Ctrl+D** to save and exit.
+
+**Example — schedule a reboot in 5 minutes:**
+```
+$ at now + 5 minutes
+at> sudo reboot
+at> 
+job 3 at Wed May  7 10:45:00 2026
+```
+
+**Example — run a script at a specific time:**
+```
+$ at 02:00 tomorrow
+at> /usr/local/bin/backup.sh >> /var/log/backup.log 2>&1
+at>
+job 4 at Thu May  8 02:00:00 2026
+```
+
+**Pipe a command directly (non-interactive — use in scripts):**
+```bash
+echo "/usr/local/bin/backup.sh" | at 02:00 tomorrow
+echo "systemctl restart nginx" | at now + 30 minutes
+```
+
+**Run a here-document block (multiple commands at once):**
+```bash
+at now + 1 hour << 'EOF'
+dnf update -y
+systemctl restart nginx
+echo "Update done $(date)" >> /var/log/update.log
+EOF
+```
+
+---
+
+#### Managing Queued Jobs
+
+```bash
+atq                             # List all pending at jobs (same as: at -l)
+at -l                           # List pending jobs — shows job ID, time, queue, user
+
+atrm 3                          # Remove (cancel) job number 3
+at -d 3                         # Same as atrm — delete job 3
+atrm 3 4 5                      # Cancel multiple jobs at once
+
+at -c 3                         # Print the full script/environment of job 3 (inspect what will run)
+```
+
+**`atq` output explained:**
+```
+3   Wed May  7 10:45:00 2026  a  root
+4   Thu May  8 02:00:00 2026  a  root
+│   │                         │  └── User who scheduled the job
+│   │                         └───── Queue (a = default at queue)
+│   └─────────────────────────────── Scheduled execution time
+└─────────────────────────────────── Job ID
+```
+
+---
+
+#### Access Control — Allow / Deny Users
+
+```bash
+# If /etc/at.allow exists → ONLY users listed in it can use at
+sudo vi /etc/at.allow           # Add one username per line
+
+# If /etc/at.allow does NOT exist and /etc/at.deny exists →
+# everyone EXCEPT users in at.deny can use at
+sudo vi /etc/at.deny            # Add one username per line to block
+
+# If NEITHER file exists → only root can use at
+```
+
+---
+
+#### Scheduling Tool Comparison
+
+| Tool | Type | Best for |
+|------|------|---------|
+| `cron` | Recurring | Regular schedules: hourly, daily, weekly |
+| `anacron` | Recurring (catch-up) | Systems not always on; missed daily/weekly jobs |
+| `at` | One-time | Single future event: reboot, script, alert |
+| `systemd timer` | Recurring / one-time | Full logging, dependencies, modern replacement for both |
+
+---
+
 ## 18. Networking
 
 ### Interface Overview
@@ -1976,19 +2082,6 @@ sudo nmcli con add type ethernet ifname ens33 con-name "static-ens33" \
 | `con-name "name"` | Logical profile name (used in all future `nmcli con` commands) |
 | `ipv4.method manual` | Static IP — disables DHCP |
 | `ipv4.method auto` | DHCP — let the network assign the IP |
-
-> ⚠️ **Connection names with spaces** — RHEL often creates profiles with spaces in the name
-> (e.g. `cloud-init ens3`, `Wired connection 1`). You must quote or escape them in every command:
->
-> ```bash
-> # All three forms are equivalent — pick one:
-> nmcli con show "cloud-init ens3"                        # Method 1 — double quotes (recommended)
-> nmcli con show cloud-init\ ens3                         # Method 2 — backslash escape
-> nmcli con show fab1e257-61a6-3526-abf9-8c50c83a28c7     # Method 3 — UUID (safest, no ambiguity)
->
-> # Get the UUID from:
-> nmcli con show                                          # Lists all profiles with their UUIDs
-> ```
 
 ---
 
@@ -2343,70 +2436,7 @@ ssh -i ~/.ssh/my_key user@server    # Use a specific private key
 ssh -v user@server                  # Verbose: debug connection issues
 ```
 
----
-
-**Remote Command Execution — `ssh host "command"`**
-
-Run a command on a remote host without opening an interactive shell.
-The command executes, output is returned to your terminal, then the connection closes.
-
-```bash
-# --- Inspect remote host ---
-ssh servera "hostname -I"                               # Get all IPs of the remote host
-ssh servera "hostname -f"                               # Get remote FQDN
-ssh servera "uname -r"                                  # Remote kernel version
-ssh servera "uptime"                                    # Remote load and uptime
-
-# --- NetworkManager remotely ---
-ssh servera "nmcli con show"                            # List all connection profiles on remote host
-ssh servera "nmcli device status"                       # Interface status on remote host
-ssh servera "nmcli con show ens3"                       # Full profile details on remote host
-
-# --- Modify remote connection (append DNS) ---
-ssh servera "nmcli con mod ens3 +ipv4.dns 8.8.8.8"
-ssh servera "nmcli con mod 'cloud-init ens3' +ipv4.dns 8.8.8.8"     # Name has spaces → quote it
-ssh servera "nmcli con mod cloud-init\ ens3 +ipv4.dns 8.8.8.8"      # or backslash-escape the space
-ssh servera "nmcli con down ens3 && nmcli con up ens3"               # Apply changes
-
-# --- Collect remote system info ---
-ssh servera "df -h"                                     # Remote disk usage
-ssh servera "free -h"                                   # Remote memory usage
-ssh servera "cat /etc/redhat-release"                   # Remote RHEL version
-ssh servera "ip -br addr show"                          # Remote interface list (brief)
-ssh servera "ss -tulnp"                                 # Remote listening ports
-ssh servera "systemctl status nginx"                    # Remote service status
-
-# --- Run multiple commands in one SSH session ---
-ssh servera "nmcli con show; hostname -I; uptime"       # Semicolons: always run all
-ssh servera "dnf check-update && echo 'updates available'"  # Only echo if updates exist
-
-# --- Capture remote output into a local variable ---
-REMOTE_IP=$(ssh servera "hostname -I")
-echo "servera IP: $REMOTE_IP"
-
-# --- Run commands that need sudo remotely ---
-# -t allocates a pseudo-TTY — required for sudo password prompts
-ssh -t servera "sudo systemctl restart nginx"
-ssh -t servera "sudo nmcli con up ens3"
-
-# --- Run a local script on a remote host (no need to copy it first) ---
-ssh servera 'bash -s' < local_script.sh
-```
-
-**Remote command reference:**
-
-| Pattern | Use case |
-|---------|---------|
-| `ssh host "cmd"` | Run one command, return output, close |
-| `ssh host "cmd1; cmd2"` | Run multiple commands (always runs all) |
-| `ssh host "cmd1 && cmd2"` | Run cmd2 only if cmd1 succeeds |
-| `ssh -t host "sudo cmd"` | Run sudo — `-t` required for password prompt |
-| `ssh host 'bash -s' < script.sh` | Execute a local script remotely |
-| `VAR=$(ssh host "cmd")` | Capture remote output into a local variable |
-
-> **Quote carefully:** the outer quotes go to your local shell; the inner command is what the remote shell sees.
-> Use single quotes `'...'` when the command contains `$variables` you want evaluated on the **remote** host.
-> Use double quotes `"..."` when `$variables` should be evaluated on the **local** host before sending.
+**Set up passwordless SSH (key-based auth):**
 ```bash
 # Generate a key pair (run on the CLIENT):
 ssh-keygen -t ed25519               # Ed25519 — modern and recommended
