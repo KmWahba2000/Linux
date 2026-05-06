@@ -6,7 +6,7 @@
 1. [File Management](#1-file-management)
 2. [Text File Operations](#2-text-file-operations)
 3. [Redirection](#3-redirection)
-4. [Pipes & Filters](#4-pipes--filters)
+4. [Pipes & Filters — including Command Chaining (`&&`, `||`)](#4-pipes--filters)
 5. [Environment Variables](#5-environment-variables)
 6. [Shell Expansions](#6-shell-expansions)
 
@@ -163,6 +163,24 @@ ls -lh file.txt         # List file with human-readable size
 
 ## 3. Redirection
 
+### Operator Quick Reference
+
+| Operator | Stream | Behavior |
+|----------|--------|----------|
+| `>` | stdout | Redirect to file — **overwrites** |
+| `>>` | stdout | Redirect to file — **appends** |
+| `2>` | stderr | Redirect errors to file — overwrites |
+| `2>>` | stderr | Redirect errors to file — **appends** |
+| `&>` | stdout + stderr | Redirect both to file — overwrites |
+| `&>>` | stdout + stderr | Redirect both to file — **appends** |
+| `2>&1` | stderr → stdout | Merge stderr **into** the stdout stream |
+| `<` | stdin | Feed a file **into** a command as input |
+
+> **Stream numbers:** `0` = stdin, `1` = stdout, `2` = stderr.
+> `2>&1` means "send stream 2 to wherever stream 1 is currently going".
+
+---
+
 ### Output — Write, Overwrite, Append
 
 ```bash
@@ -179,11 +197,16 @@ ls >> file.txt                  # Append ls output without erasing previous cont
 ```bash
 du -h img1.jpg img2.jpg > out.txt 2> error.txt    # stdout → out.txt, stderr → error.txt
 du -h img1.jpg img2.jpg 2> /dev/null              # Discard all errors
+du -h img1.jpg img2.jpg 2>> error.txt             # Append errors only (stdout still goes to terminal)
 du -h img1.jpg img2.jpg > out.txt 2>&1            # Merge stderr into stdout → both go to out.txt
-du -h img1.jpg img2.jpg &> all.txt                # Shorthand: merge both to one file
+du -h img1.jpg img2.jpg &> all.txt                # Overwrite: both stdout + stderr to one file
+du -h img1.jpg img2.jpg &>> all.txt               # Append: both stdout + stderr to one file
 ```
 
 > `/dev/null` is a "black hole" — anything written there is discarded.
+>
+> **`2>&1` order matters:** `> out.txt 2>&1` is correct (stderr follows stdout to the file).
+> `2>&1 > out.txt` is wrong — it sends stderr to the terminal and only stdout to the file.
 
 ---
 
@@ -298,6 +321,120 @@ sed '/pattern/d' file.txt               # Delete lines matching pattern
 | `i` | Case-insensitive match |
 
 > `-i` is a **`sed` command-line option** (not a substitution flag): it edits the file in place instead of printing to stdout.
+
+---
+
+### Command Chaining — `&&`, `||`, `;`
+
+These operators chain commands based on the **exit code** of the previous command.
+Every command returns an exit code: **0 = success**, **non-zero = failure**.
+
+```bash
+# && — AND: run the second command ONLY if the first succeeds (exit code = 0)
+sudo dnf update && sudo reboot              # Reboot only if update succeeded
+mkdir /data && cd /data                     # cd only if mkdir worked
+sudo systemctl start nginx && echo "nginx is up"
+
+# || — OR: run the second command ONLY if the first FAILS (exit code ≠ 0)
+ping -c 1 8.8.8.8 || echo "Network unreachable"        # Print message if ping fails
+sudo systemctl start nginx || echo "nginx failed"
+cd /data || mkdir /data                                 # Create /data if cd fails (directory missing)
+
+# ; — Semicolon: run commands sequentially regardless of exit code (no condition)
+echo "start"; sleep 2; echo "done"
+cd /tmp; ls; cd -
+
+# & — Background: start in background, shell continues immediately (see Section 11 — Job Control)
+ping -c 10 google.com &
+```
+
+**Operator comparison:**
+
+| Operator | Runs next command when... | Typical use |
+|----------|--------------------------|-------------|
+| `&&` | Previous command **succeeded** (exit 0) | Install then start a service |
+| `\|\|` | Previous command **failed** (exit ≠ 0) | Fallback / error handler |
+| `;` | **Always** — regardless of exit code | Sequential steps, no dependency |
+| `&` | Immediately — previous runs in background | Fire-and-forget background jobs |
+
+---
+
+### Real-world Example — Host Reachability Check with `ping`
+
+**One-liner:** ping a host and route normal output and errors into separate log files:
+
+```bash
+ping -c 4 servera >> output.log 2>> error.log
+```
+
+| Part | Meaning |
+|------|---------|
+| `ping -c 4 servera` | Send exactly 4 ICMP packets to `servera` |
+| `>> output.log` | **Append** ping replies (stdout) to `output.log` |
+| `2>> error.log` | **Append** any errors (stderr) to `error.log` |
+
+**When `servera` is reachable — `output.log` receives:**
+```
+PING servera (192.168.1.10) 56(84) bytes of data.
+64 bytes from servera (192.168.1.10): icmp_seq=1 ttl=64 time=0.42 ms
+64 bytes from servera (192.168.1.10): icmp_seq=2 ttl=64 time=0.38 ms
+64 bytes from servera (192.168.1.10): icmp_seq=3 ttl=64 time=0.41 ms
+64 bytes from servera (192.168.1.10): icmp_seq=4 ttl=64 time=0.39 ms
+
+--- servera ping statistics ---
+4 packets transmitted, 4 received, 0% packet loss
+```
+
+**When `servera` is unreachable — `error.log` receives:**
+```
+ping: servera: Name or service not known
+```
+
+---
+
+**Script version** — accepts a hostname as argument, logs result to separate files:
+
+> ⚠️ Three bugs fixed from the original snippet:
+> 1. `png` → `ping` (typo)
+> 2. `ping -c $SERV` → `ping -c 4 $SERV` (`-c` takes a packet **count**, not a hostname)
+> 3. `$SRV` → `$SERV` (variable assigned as `SERV` but read as `SRV` — always undefined)
+
+```bash
+#!/bin/bash
+SERV=$1
+
+if ping -c 4 "$SERV" >> /dev/null 2>&1
+then
+    echo "ok" >> ok.log
+else
+    echo "error $SERV" >> error.log
+fi
+```
+
+**Line-by-line:**
+
+| Line | What it does |
+|------|-------------|
+| `SERV=$1` | Store the first argument (hostname) in variable `SERV` |
+| `ping -c 4 "$SERV"` | Send 4 ICMP packets to the hostname in `$SERV` |
+| `>> /dev/null 2>&1` | Discard ALL output — stdout → `/dev/null`; `2>&1` merges stderr into stdout (also discarded). Only the **exit code** matters here |
+| `if ...; then` | If ping exits 0 (host replied) → execute the `then` block |
+| `echo "ok" >> ok.log` | Append "ok" to `ok.log` |
+| `else` | If ping exits non-zero (unreachable, DNS fail, timeout) |
+| `echo "error $SERV" >> error.log` | Append the failed hostname to `error.log` |
+
+**Usage and output:**
+```bash
+chmod +x check_host.sh
+
+bash check_host.sh servera          # Host responds to ping
+cat ok.log
+# ok
+
+bash check_host.sh badhost          # Host unreachable or DNS failure
+cat error.log
+# error badhost
+```
 
 ---
 
