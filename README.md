@@ -163,24 +163,6 @@ ls -lh file.txt         # List file with human-readable size
 
 ## 3. Redirection
 
-### Operator Quick Reference
-
-| Operator | Stream | Behavior |
-|----------|--------|----------|
-| `>` | stdout | Redirect to file — **overwrites** |
-| `>>` | stdout | Redirect to file — **appends** |
-| `2>` | stderr | Redirect errors to file — overwrites |
-| `2>>` | stderr | Redirect errors to file — **appends** |
-| `&>` | stdout + stderr | Redirect both to file — overwrites |
-| `&>>` | stdout + stderr | Redirect both to file — **appends** |
-| `2>&1` | stderr → stdout | Merge stderr **into** the stdout stream |
-| `<` | stdin | Feed a file **into** a command as input |
-
-> **Stream numbers:** `0` = stdin, `1` = stdout, `2` = stderr.
-> `2>&1` means "send stream 2 to wherever stream 1 is currently going".
-
----
-
 ### Output — Write, Overwrite, Append
 
 ```bash
@@ -197,16 +179,11 @@ ls >> file.txt                  # Append ls output without erasing previous cont
 ```bash
 du -h img1.jpg img2.jpg > out.txt 2> error.txt    # stdout → out.txt, stderr → error.txt
 du -h img1.jpg img2.jpg 2> /dev/null              # Discard all errors
-du -h img1.jpg img2.jpg 2>> error.txt             # Append errors only (stdout still goes to terminal)
 du -h img1.jpg img2.jpg > out.txt 2>&1            # Merge stderr into stdout → both go to out.txt
-du -h img1.jpg img2.jpg &> all.txt                # Overwrite: both stdout + stderr to one file
-du -h img1.jpg img2.jpg &>> all.txt               # Append: both stdout + stderr to one file
+du -h img1.jpg img2.jpg &> all.txt                # Shorthand: merge both to one file
 ```
 
 > `/dev/null` is a "black hole" — anything written there is discarded.
->
-> **`2>&1` order matters:** `> out.txt 2>&1` is correct (stderr follows stdout to the file).
-> `2>&1 > out.txt` is wrong — it sends stderr to the terminal and only stdout to the file.
 
 ---
 
@@ -321,120 +298,6 @@ sed '/pattern/d' file.txt               # Delete lines matching pattern
 | `i` | Case-insensitive match |
 
 > `-i` is a **`sed` command-line option** (not a substitution flag): it edits the file in place instead of printing to stdout.
-
----
-
-### Command Chaining — `&&`, `||`, `;`
-
-These operators chain commands based on the **exit code** of the previous command.
-Every command returns an exit code: **0 = success**, **non-zero = failure**.
-
-```bash
-# && — AND: run the second command ONLY if the first succeeds (exit code = 0)
-sudo dnf update && sudo reboot              # Reboot only if update succeeded
-mkdir /data && cd /data                     # cd only if mkdir worked
-sudo systemctl start nginx && echo "nginx is up"
-
-# || — OR: run the second command ONLY if the first FAILS (exit code ≠ 0)
-ping -c 1 8.8.8.8 || echo "Network unreachable"        # Print message if ping fails
-sudo systemctl start nginx || echo "nginx failed"
-cd /data || mkdir /data                                 # Create /data if cd fails (directory missing)
-
-# ; — Semicolon: run commands sequentially regardless of exit code (no condition)
-echo "start"; sleep 2; echo "done"
-cd /tmp; ls; cd -
-
-# & — Background: start in background, shell continues immediately (see Section 11 — Job Control)
-ping -c 10 google.com &
-```
-
-**Operator comparison:**
-
-| Operator | Runs next command when... | Typical use |
-|----------|--------------------------|-------------|
-| `&&` | Previous command **succeeded** (exit 0) | Install then start a service |
-| `\|\|` | Previous command **failed** (exit ≠ 0) | Fallback / error handler |
-| `;` | **Always** — regardless of exit code | Sequential steps, no dependency |
-| `&` | Immediately — previous runs in background | Fire-and-forget background jobs |
-
----
-
-### Real-world Example — Host Reachability Check with `ping`
-
-**One-liner:** ping a host and route normal output and errors into separate log files:
-
-```bash
-ping -c 4 servera >> output.log 2>> error.log
-```
-
-| Part | Meaning |
-|------|---------|
-| `ping -c 4 servera` | Send exactly 4 ICMP packets to `servera` |
-| `>> output.log` | **Append** ping replies (stdout) to `output.log` |
-| `2>> error.log` | **Append** any errors (stderr) to `error.log` |
-
-**When `servera` is reachable — `output.log` receives:**
-```
-PING servera (192.168.1.10) 56(84) bytes of data.
-64 bytes from servera (192.168.1.10): icmp_seq=1 ttl=64 time=0.42 ms
-64 bytes from servera (192.168.1.10): icmp_seq=2 ttl=64 time=0.38 ms
-64 bytes from servera (192.168.1.10): icmp_seq=3 ttl=64 time=0.41 ms
-64 bytes from servera (192.168.1.10): icmp_seq=4 ttl=64 time=0.39 ms
-
---- servera ping statistics ---
-4 packets transmitted, 4 received, 0% packet loss
-```
-
-**When `servera` is unreachable — `error.log` receives:**
-```
-ping: servera: Name or service not known
-```
-
----
-
-**Script version** — accepts a hostname as argument, logs result to separate files:
-
-> ⚠️ Three bugs fixed from the original snippet:
-> 1. `png` → `ping` (typo)
-> 2. `ping -c $SERV` → `ping -c 4 $SERV` (`-c` takes a packet **count**, not a hostname)
-> 3. `$SRV` → `$SERV` (variable assigned as `SERV` but read as `SRV` — always undefined)
-
-```bash
-#!/bin/bash
-SERV=$1
-
-if ping -c 4 "$SERV" >> /dev/null 2>&1
-then
-    echo "ok" >> ok.log
-else
-    echo "error $SERV" >> error.log
-fi
-```
-
-**Line-by-line:**
-
-| Line | What it does |
-|------|-------------|
-| `SERV=$1` | Store the first argument (hostname) in variable `SERV` |
-| `ping -c 4 "$SERV"` | Send 4 ICMP packets to the hostname in `$SERV` |
-| `>> /dev/null 2>&1` | Discard ALL output — stdout → `/dev/null`; `2>&1` merges stderr into stdout (also discarded). Only the **exit code** matters here |
-| `if ...; then` | If ping exits 0 (host replied) → execute the `then` block |
-| `echo "ok" >> ok.log` | Append "ok" to `ok.log` |
-| `else` | If ping exits non-zero (unreachable, DNS fail, timeout) |
-| `echo "error $SERV" >> error.log` | Append the failed hostname to `error.log` |
-
-**Usage and output:**
-```bash
-chmod +x check_host.sh
-
-bash check_host.sh servera          # Host responds to ping
-cat ok.log
-# ok
-
-bash check_host.sh badhost          # Host unreachable or DNS failure
-cat error.log
-# error badhost
-```
 
 ---
 
@@ -825,10 +688,19 @@ username ALL=(ALL:ALL) NOPASSWD: /usr/bin/dnf
 ### Hostname
 
 ```bash
-hostnamectl                             # Show current hostname and system info
-sudo hostnamectl set-hostname my-host   # Change hostname (persistent)
+hostnamectl                             # Show current hostname and full system info
+hostname                                # Print the short hostname only
+hostname -I                             # Print ALL IP addresses assigned to this host (all interfaces)
+hostname -i                             # Print the primary IP address (DNS-resolved)
+hostname -s                             # Short hostname (same as hostname alone)
+hostname -f                             # Fully Qualified Domain Name (FQDN), e.g. server1.example.com
+
+sudo hostnamectl set-hostname my-host   # Change hostname permanently (takes effect immediately)
 sudo vi /etc/hosts                      # Add: 127.0.0.1    my-host
 ```
+
+> `hostname -I` is the quickest way to check what IPs a machine has without parsing `ip addr show`.
+> Useful over SSH: `ssh servera "hostname -I"` to confirm a remote host's IP without logging in.
 
 ---
 
@@ -2105,6 +1977,19 @@ sudo nmcli con add type ethernet ifname ens33 con-name "static-ens33" \
 | `ipv4.method manual` | Static IP — disables DHCP |
 | `ipv4.method auto` | DHCP — let the network assign the IP |
 
+> ⚠️ **Connection names with spaces** — RHEL often creates profiles with spaces in the name
+> (e.g. `cloud-init ens3`, `Wired connection 1`). You must quote or escape them in every command:
+>
+> ```bash
+> # All three forms are equivalent — pick one:
+> nmcli con show "cloud-init ens3"                        # Method 1 — double quotes (recommended)
+> nmcli con show cloud-init\ ens3                         # Method 2 — backslash escape
+> nmcli con show fab1e257-61a6-3526-abf9-8c50c83a28c7     # Method 3 — UUID (safest, no ambiguity)
+>
+> # Get the UUID from:
+> nmcli con show                                          # Lists all profiles with their UUIDs
+> ```
+
 ---
 
 #### 3. Configure — IP, Gateway, DNS
@@ -2458,7 +2343,70 @@ ssh -i ~/.ssh/my_key user@server    # Use a specific private key
 ssh -v user@server                  # Verbose: debug connection issues
 ```
 
-**Set up passwordless SSH (key-based auth):**
+---
+
+**Remote Command Execution — `ssh host "command"`**
+
+Run a command on a remote host without opening an interactive shell.
+The command executes, output is returned to your terminal, then the connection closes.
+
+```bash
+# --- Inspect remote host ---
+ssh servera "hostname -I"                               # Get all IPs of the remote host
+ssh servera "hostname -f"                               # Get remote FQDN
+ssh servera "uname -r"                                  # Remote kernel version
+ssh servera "uptime"                                    # Remote load and uptime
+
+# --- NetworkManager remotely ---
+ssh servera "nmcli con show"                            # List all connection profiles on remote host
+ssh servera "nmcli device status"                       # Interface status on remote host
+ssh servera "nmcli con show ens3"                       # Full profile details on remote host
+
+# --- Modify remote connection (append DNS) ---
+ssh servera "nmcli con mod ens3 +ipv4.dns 8.8.8.8"
+ssh servera "nmcli con mod 'cloud-init ens3' +ipv4.dns 8.8.8.8"     # Name has spaces → quote it
+ssh servera "nmcli con mod cloud-init\ ens3 +ipv4.dns 8.8.8.8"      # or backslash-escape the space
+ssh servera "nmcli con down ens3 && nmcli con up ens3"               # Apply changes
+
+# --- Collect remote system info ---
+ssh servera "df -h"                                     # Remote disk usage
+ssh servera "free -h"                                   # Remote memory usage
+ssh servera "cat /etc/redhat-release"                   # Remote RHEL version
+ssh servera "ip -br addr show"                          # Remote interface list (brief)
+ssh servera "ss -tulnp"                                 # Remote listening ports
+ssh servera "systemctl status nginx"                    # Remote service status
+
+# --- Run multiple commands in one SSH session ---
+ssh servera "nmcli con show; hostname -I; uptime"       # Semicolons: always run all
+ssh servera "dnf check-update && echo 'updates available'"  # Only echo if updates exist
+
+# --- Capture remote output into a local variable ---
+REMOTE_IP=$(ssh servera "hostname -I")
+echo "servera IP: $REMOTE_IP"
+
+# --- Run commands that need sudo remotely ---
+# -t allocates a pseudo-TTY — required for sudo password prompts
+ssh -t servera "sudo systemctl restart nginx"
+ssh -t servera "sudo nmcli con up ens3"
+
+# --- Run a local script on a remote host (no need to copy it first) ---
+ssh servera 'bash -s' < local_script.sh
+```
+
+**Remote command reference:**
+
+| Pattern | Use case |
+|---------|---------|
+| `ssh host "cmd"` | Run one command, return output, close |
+| `ssh host "cmd1; cmd2"` | Run multiple commands (always runs all) |
+| `ssh host "cmd1 && cmd2"` | Run cmd2 only if cmd1 succeeds |
+| `ssh -t host "sudo cmd"` | Run sudo — `-t` required for password prompt |
+| `ssh host 'bash -s' < script.sh` | Execute a local script remotely |
+| `VAR=$(ssh host "cmd")` | Capture remote output into a local variable |
+
+> **Quote carefully:** the outer quotes go to your local shell; the inner command is what the remote shell sees.
+> Use single quotes `'...'` when the command contains `$variables` you want evaluated on the **remote** host.
+> Use double quotes `"..."` when `$variables` should be evaluated on the **local** host before sending.
 ```bash
 # Generate a key pair (run on the CLIENT):
 ssh-keygen -t ed25519               # Ed25519 — modern and recommended
