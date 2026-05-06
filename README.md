@@ -6,7 +6,7 @@
 1. [File Management](#1-file-management)
 2. [Text File Operations](#2-text-file-operations)
 3. [Redirection](#3-redirection)
-4. [Pipes & Filters — including Command Chaining (`&&`, `||`)](#4-pipes--filters)
+4. [Pipes & Filters](#4-pipes--filters)
 5. [Environment Variables](#5-environment-variables)
 6. [Shell Expansions](#6-shell-expansions)
 
