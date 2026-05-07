@@ -21,7 +21,7 @@
 14. [Boot Process & Systemd](#14-boot-process--systemd)
 15. [Storage — Partitions, Mounts & LVM](#15-storage--partitions-mounts--lvm)
 16. [System Upgrade & Recovery](#16-system-upgrade--recovery)
-17. [Cron Jobs — `cron`, `anacron`, `at`](#17-cron-jobs)
+17. [Cron Jobs — `cron`, `anacron`, `at`, `tmpfiles.d`](#17-cron-jobs)
 18. [Networking](#18-networking)
 19. [Firewall (firewalld)](#19-firewall-firewalld)
 20. [SELinux](#20-selinux)
@@ -1734,12 +1734,81 @@ grub2-mkconfig -o /boot/grub2/grub.cfg
 crontab -e                  # Edit current user's crontab (opens in $EDITOR)
 EDITOR=vi crontab -e        # Force vi as editor
 crontab -l                  # List current crontab
-crontab -r                  # Remove ALL cron jobs (use with caution!)
+crontab -r                  # ⚠️  Remove ALL cron jobs — permanent, no confirmation
 crontab -u ahmed -l         # List another user's crontab (root only)
+crontab -u ahmed -e         # Edit another user's crontab (root only)
+crontab -u ahmed -r         # Remove another user's entire crontab (root only)
 
 ls /var/spool/cron/         # Crontab files stored here (root access required)
 journalctl -u crond.service -r      # Recent cron logs
 ```
+
+---
+
+### Crontab File Locations & Structure
+
+Understanding where every cron-related file lives is essential before editing, moving, or debugging jobs.
+
+```
+/var/spool/cron/                    ← User crontab files (one per user, named by username)
+│   root                            ← root's crontab on disk
+│   ahmed                           ← ahmed's crontab on disk
+│   (never edit these directly — always use: crontab -e)
+│
+/etc/crontab                        ← System-wide crontab (adds USERNAME field — see below)
+/etc/cron.d/                        ← Drop-in directory: package-installed & custom cron files
+│   0hourly                         ← Drives /etc/cron.hourly (RHEL default)
+│   sysstat                         ← Example: sysstat package adds its job here
+│
+/etc/cron.hourly/                   ← Scripts dropped here run every hour  (via run-parts)
+/etc/cron.daily/                    ← Scripts dropped here run every day
+/etc/cron.weekly/                   ← Scripts dropped here run every week
+/etc/cron.monthly/                  ← Scripts dropped here run every month
+│   (scripts must be executable and must NOT have a file extension)
+│
+/etc/anacrontab                     ← Anacron config (drives cron.daily/weekly/monthly)
+/var/spool/anacron/                 ← Anacron timestamp files (tracks last run per job)
+```
+
+**Key rules:**
+
+| Location | Edit how | Needs USERNAME field | Needs executable bit |
+|----------|----------|----------------------|----------------------|
+| `/var/spool/cron/username` | `crontab -e` only | ❌ No | N/A |
+| `/etc/crontab` | `vi /etc/crontab` directly | ✅ Yes | N/A |
+| `/etc/cron.d/*` | `vi /etc/cron.d/myfile` | ✅ Yes | ❌ No |
+| `/etc/cron.daily/*` etc. | Drop a script file | ❌ No | ✅ Yes (`chmod +x`) |
+
+```bash
+# Verify a script in a drop-in directory will actually run:
+ls -l /etc/cron.daily/myscript      # Must show -rwxr-xr-x (executable, no extension)
+run-parts --test /etc/cron.daily/   # Dry-run: list what run-parts WOULD execute
+
+# Check file permissions on a user crontab:
+ls -l /var/spool/cron/              # Each file should be -rw------- owned by the user
+```
+
+---
+
+### Removing Specific Cron Jobs
+
+`crontab -r` deletes **everything**. To remove one job without touching the rest:
+
+```bash
+# Method 1 — edit manually (safest):
+crontab -e                                      # Open editor, delete the specific line, save
+
+# Method 2 — filter out a specific job by pattern (scriptable):
+crontab -l | grep -v 'backup.sh' | crontab -    # Remove any line containing 'backup.sh'
+crontab -l | grep -v '/usr/local/bin/task.sh' | crontab -
+
+# Method 3 — safe guard against accidental -r:
+# Add this alias to ~/.bashrc to force a confirmation prompt:
+alias crontab='crontab -i'                      # -i: ask before removing with -r
+```
+
+> The pipe-to-`crontab -` pattern: `crontab -l` reads the current crontab, `grep -v` strips
+> the unwanted line, and `crontab -` installs whatever comes from stdin as the new crontab.
 
 ---
 
@@ -1807,6 +1876,141 @@ ls /etc/cron.monthly/
 
 ---
 
+### Backup, Restore & Move Crontab
+
+**Backup — save current crontab to a file:**
+```bash
+crontab -l > ~/cron.bak                     # Save current user's crontab to home directory
+crontab -l -u ahmed > /tmp/ahmed_cron.bak   # Backup another user's crontab (root only)
+```
+
+**Restore — load crontab from a file:**
+```bash
+crontab ~/cron.bak                          # Replace current crontab with backup file
+crontab -u ahmed /tmp/ahmed_cron.bak        # Restore another user's crontab (root only)
+```
+
+**Append — add jobs from a file WITHOUT wiping existing ones:**
+```bash
+(crontab -l; cat extra_jobs.txt) | crontab -    # Merge: keep current + append new lines
+```
+
+**Move to another user on the same machine:**
+```bash
+# Copy all of user1's jobs to user2 (root only):
+crontab -l -u user1 | crontab -u user2 -
+
+# Move: copy then wipe the source:
+crontab -l -u user1 | crontab -u user2 -
+crontab -r -u user1
+```
+
+**Move to another server:**
+```bash
+# Method 1 — save locally, scp, install remotely:
+crontab -l > /tmp/cron.bak
+scp /tmp/cron.bak user@newserver:/tmp/
+ssh user@newserver "crontab /tmp/cron.bak"
+
+# Method 2 — pipe directly over SSH (no temp file):
+crontab -l | ssh user@newserver "crontab -"
+
+# Method 3 — move root's crontab file directly (fastest for root):
+scp /var/spool/cron/root user@newserver:/tmp/root_cron
+ssh root@newserver "mv /tmp/root_cron /var/spool/cron/root && chmod 600 /var/spool/cron/root"
+
+# Verify on the destination after any move:
+ssh user@newserver "crontab -l"
+```
+
+**Move system-wide drop-in jobs (`/etc/cron.d/`):**
+```bash
+# Copy all drop-in job files to another server:
+scp /etc/cron.d/* root@newserver:/etc/cron.d/
+
+# Copy and set correct ownership and permissions:
+scp /etc/cron.d/myjob root@newserver:/etc/cron.d/
+ssh root@newserver "chmod 644 /etc/cron.d/myjob && chown root:root /etc/cron.d/myjob"
+```
+
+---
+
+### Auto-Cleanup Jobs
+
+Use cron to automatically remove old files, stale logs, and expired backups.
+
+**Remove old temp files:**
+```bash
+# Delete files in /tmp not accessed in the last 7 days (runs daily at 3 AM):
+0 3 * * *  root  find /tmp -type f -atime +7 -delete
+
+# Delete files AND empty directories older than 7 days:
+0 3 * * *  root  find /tmp -mtime +7 -delete
+```
+
+**Rotate and clean application logs:**
+```bash
+# Delete log files older than 30 days:
+0 4 * * *  root  find /var/log/myapp -name "*.log" -mtime +30 -delete
+
+# Compress logs older than 7 days (saves disk, keeps history):
+0 2 * * *  root  find /var/log/myapp -name "*.log" -mtime +7 -exec gzip {} \;
+
+# Delete logs larger than 500 MB:
+0 5 * * 0  root  find /var/log/myapp -name "*.log" -size +500M -delete
+```
+
+**Expire old backups:**
+```bash
+# Keep only the last 14 days of backups:
+0 6 * * *  root  find /backup -name "*.tar.gz" -mtime +14 -delete >> /var/log/cleanup.log 2>&1
+
+# Keep only the 7 most recent backup files (regardless of age):
+0 6 * * *  root  ls -t /backup/*.tar.gz | tail -n +8 | xargs rm -f
+```
+
+**Truncate a log file that must not be deleted (e.g. a service keeps it open):**
+```bash
+# Truncate without removing the file (safe for open file handles):
+0 0 * * 0  root  truncate -s 0 /var/log/myapp/app.log
+# Or using redirection:
+0 0 * * 0  root  > /var/log/myapp/app.log
+```
+
+**Systemd `tmpfiles.d` — the modern RHEL alternative for /tmp cleanup:**
+
+> On RHEL 8/9, `/tmp` auto-cleanup is handled by `systemd-tmpfiles`, not cron.
+> You do **not** need a cron job to clean `/tmp` — it is already managed.
+
+```bash
+cat /usr/lib/tmpfiles.d/tmp.conf        # Default rules: /tmp cleared after 10 days, /var/tmp after 30
+ls /etc/tmpfiles.d/                     # Drop custom rules here (overrides defaults)
+
+# Create a custom rule to auto-clean /var/myapp/cache after 5 days:
+sudo vi /etc/tmpfiles.d/myapp.conf
+# Add:  d /var/myapp/cache 0755 myuser mygroup 5d
+
+# Apply rules immediately without waiting for next boot:
+sudo systemd-tmpfiles --clean
+sudo systemd-tmpfiles --create
+
+# Test what a rule file WOULD do (dry-run):
+sudo systemd-tmpfiles --clean /etc/tmpfiles.d/myapp.conf
+```
+
+**`tmpfiles.d` rule format:**
+
+| Field | Example | Meaning |
+|-------|---------|---------|
+| Type | `d` | Create directory if missing; `D` = also clean contents |
+| Path | `/var/myapp/cache` | Target path |
+| Mode | `0755` | Permissions |
+| User | `myuser` | Owner |
+| Group | `mygroup` | Group |
+| Age | `5d` | Remove files older than 5 days (`10d`, `1h`, `-` = never) |
+
+---
+
 ### Email Notifications
 
 ```bash
@@ -1838,121 +2042,6 @@ cat /etc/anacrontab     # Main anacron config
 7               10          cron.weekly  run-parts /etc/cron.weekly
 30              15          cron.monthly run-parts /etc/cron.monthly
 ```
-
----
-
-### `at` — One-Time Scheduled Jobs
-
-`at` runs a command **once** at a specific future time.
-Unlike cron (recurring), `at` is for single-shot tasks: run this backup at 2 AM, reboot after 10 minutes, send a report at end of day.
-
-```bash
-# Install if not present:
-sudo dnf install at
-sudo systemctl enable --now atd        # atd daemon must be running
-```
-
----
-
-#### Scheduling a Job
-
-```bash
-at 14:30                        # Schedule for today at 2:30 PM
-at 14:30 tomorrow               # Tomorrow at 2:30 PM
-at 14:30 July 25                # Specific date at 2:30 PM
-at 14:30 07/25/2027             # Same — MM/DD/YYYY format
-at now + 10 minutes             # 10 minutes from now
-at now + 2 hours                # 2 hours from now
-at now + 3 days                 # 3 days from now
-at midnight                     # Tonight at 00:00
-at noon                         # Today at 12:00
-at teatime                      # Today at 4:00 PM (16:00)
-```
-
-> After typing an `at` command, you land in an interactive prompt (`at>`).
-> Type your commands, then press **Ctrl+D** to save and exit.
-
-**Example — schedule a reboot in 5 minutes:**
-```
-$ at now + 5 minutes
-at> sudo reboot
-at> 
-job 3 at Wed May  7 10:45:00 2026
-```
-
-**Example — run a script at a specific time:**
-```
-$ at 02:00 tomorrow
-at> /usr/local/bin/backup.sh >> /var/log/backup.log 2>&1
-at>
-job 4 at Thu May  8 02:00:00 2026
-```
-
-**Pipe a command directly (non-interactive — use in scripts):**
-```bash
-echo "/usr/local/bin/backup.sh" | at 02:00 tomorrow
-echo "systemctl restart nginx" | at now + 30 minutes
-```
-
-**Run a here-document block (multiple commands at once):**
-```bash
-at now + 1 hour << 'EOF'
-dnf update -y
-systemctl restart nginx
-echo "Update done $(date)" >> /var/log/update.log
-EOF
-```
-
----
-
-#### Managing Queued Jobs
-
-```bash
-atq                             # List all pending at jobs (same as: at -l)
-at -l                           # List pending jobs — shows job ID, time, queue, user
-
-atrm 3                          # Remove (cancel) job number 3
-at -d 3                         # Same as atrm — delete job 3
-atrm 3 4 5                      # Cancel multiple jobs at once
-
-at -c 3                         # Print the full script/environment of job 3 (inspect what will run)
-```
-
-**`atq` output explained:**
-```
-3   Wed May  7 10:45:00 2026  a  root
-4   Thu May  8 02:00:00 2026  a  root
-│   │                         │  └── User who scheduled the job
-│   │                         └───── Queue (a = default at queue)
-│   └─────────────────────────────── Scheduled execution time
-└─────────────────────────────────── Job ID
-```
-
----
-
-#### Access Control — Allow / Deny Users
-
-```bash
-# If /etc/at.allow exists → ONLY users listed in it can use at
-sudo vi /etc/at.allow           # Add one username per line
-
-# If /etc/at.allow does NOT exist and /etc/at.deny exists →
-# everyone EXCEPT users in at.deny can use at
-sudo vi /etc/at.deny            # Add one username per line to block
-
-# If NEITHER file exists → only root can use at
-```
-
----
-
-#### Scheduling Tool Comparison
-
-| Tool | Type | Best for |
-|------|------|---------|
-| `cron` | Recurring | Regular schedules: hourly, daily, weekly |
-| `anacron` | Recurring (catch-up) | Systems not always on; missed daily/weekly jobs |
-| `at` | One-time | Single future event: reboot, script, alert |
-| `systemd timer` | Recurring / one-time | Full logging, dependencies, modern replacement for both |
 
 ---
 
