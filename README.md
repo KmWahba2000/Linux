@@ -19,7 +19,7 @@
 12. [Archives & Compression](#12-archives--compression)
 13. [Package Management](#13-package-management)
 14. [Boot Process & Systemd](#14-boot-process--systemd)
-15. [Storage — Partitions, Mounts & LVM](#15-storage--partitions-mounts--lvm)
+15. [Storage — Partitions, Mounts, LVM & Swap](#15-storage--partitions-mounts--lvm)
 16. [System Upgrade & Recovery](#16-system-upgrade--recovery)
 17. [Cron Jobs — `cron`, `anacron`, `at`, `tmpfiles.d`](#17-cron-jobs)
 18. [Networking](#18-networking)
@@ -109,6 +109,43 @@ rmdir pages                             # Delete an EMPTY directory only
 ```
 
 > ⚠️ There is no Recycle Bin in the terminal. `rm` is permanent.
+
+---
+
+### Finding Files — `find`
+
+```bash
+# Find by name:
+find /etc -name "sshd_config"               # Exact filename match
+find /etc -name "*.conf"                    # All .conf files under /etc
+find /var/log -name "*.log" -type f         # Files only (not directories)
+find / -name "nginx" -type d                # Directories named nginx
+
+# Find by owner / permissions:
+find /home -user ahmed                      # Files owned by user 'ahmed'
+find /var -group developers                 # Files owned by group 'developers'
+find / -perm -4000                          # All SetUID files (security audit)
+find / -perm -2000                          # All SetGID files
+
+# Find by size:
+find /var/log -size +100M                   # Files larger than 100 MB
+find /tmp -size -1k                         # Files smaller than 1 KB
+
+# Find by age:
+find /tmp -mtime +7                         # Modified more than 7 days ago
+find /var/log -mtime -1                     # Modified in the last 24 hours
+find /tmp -atime +30                        # Not accessed in 30+ days
+
+# Execute an action on results:
+find /tmp -mtime +7 -delete                 # Delete files older than 7 days
+find /var/log -name "*.log" -mtime +30 -exec gzip {} \;    # Compress old logs
+find /home -name "*.sh" -exec chmod +x {} \;               # Make scripts executable
+find /etc -name "*.conf" -exec grep -l 'maxconn' {} \;     # Search inside found files
+
+# Combine conditions:
+find /var -type f -name "*.log" -size +50M -mtime +7       # Large old logs
+find / -type f -perm -o+w 2>/dev/null                      # World-writable files (security check)
+```
 
 ---
 
@@ -972,6 +1009,14 @@ top -u username -d 1 -c         # Filter by user, 1s refresh, show full commands
 # htop — enhanced top (requires EPEL; see Section 13 for EPEL setup):
 sudo dnf install htop
 htop
+
+# Memory usage at a glance:
+free -h                         # RAM and swap usage (human-readable)
+free -h -s 2                    # Refresh every 2 seconds
+
+# vmstat — compact snapshot of CPU, memory, swap, I/O, and processes:
+vmstat 1 5                      # Print 5 updates, 1 second apart
+vmstat -s                       # Single summary report (memory stats)
 ```
 
 **`top` keyboard shortcuts:**
@@ -1388,7 +1433,13 @@ journalctl -b -1                        # Logs from the previous boot
 journalctl -u nginx                     # Logs for nginx service
 journalctl -u nginx -f                  # Follow nginx logs live
 journalctl -u nginx -r                  # Reverse (newest first)
-journalctl -p err                       # Error level and above only
+journalctl -p err                       # Error level and above only (err, crit, alert, emerg)
+
+# Combined: priority filter + time window (most useful for troubleshooting):
+journalctl -p err --since "today"                       # All errors since midnight
+journalctl -p err --since "1 hour ago"                  # Errors in the last hour
+journalctl -p err --since "2 hours ago" --until "1 hour ago"   # Specific window
+journalctl -u nginx -p err --since "1 hour ago"         # Errors for a specific service + time
 
 journalctl --since "today"
 journalctl --since "2 hours ago"
@@ -1666,6 +1717,52 @@ sudo vgremove myvg
 sudo pvremove /dev/sdb1 /dev/sdc1
 sudo wipefs -a /dev/sdb /dev/sdc
 lsblk -f                                        # Confirm clean state
+```
+
+---
+
+### Swap
+
+```bash
+# --- Create a swap file ---
+sudo fallocate -l 2G /swapfile              # Allocate 2 GB swap file (fastest method)
+# If fallocate is not supported on the filesystem (e.g. NFS, XFS on some configs):
+sudo dd if=/dev/zero of=/swapfile bs=1M count=2048   # Fallback: create with dd
+
+sudo chmod 600 /swapfile                    # ⚠️ Required: only root should access swap
+sudo mkswap /swapfile                       # Format as swap space
+sudo swapon /swapfile                       # Enable swap immediately
+
+# --- Verify ---
+swapon --show                               # List all active swap spaces (type, size, used)
+free -h                                     # Confirm swap column shows new size
+cat /proc/swaps                             # Alternative view of active swap
+
+# --- Make persistent across reboots ---
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+sudo mount -a                               # Validate fstab has no errors
+
+# --- Disable swap ---
+sudo swapoff /swapfile                      # Disable this swap file (moves data back to RAM)
+sudo swapoff -a                             # Disable ALL active swap
+
+# --- Resize: to change swap size, disable → re-create → re-enable ---
+sudo swapoff /swapfile
+sudo fallocate -l 4G /swapfile              # Resize to 4 GB
+sudo mkswap /swapfile
+sudo swapon /swapfile
+
+# --- Swap partition (alternative to swap file) ---
+sudo mkswap /dev/sdb2                       # Format a partition as swap
+sudo swapon /dev/sdb2                       # Activate it
+# /etc/fstab entry for a swap partition:
+# UUID=<uuid>   none   swap   sw   0   0
+
+# --- Swappiness: how aggressively the kernel uses swap ---
+cat /proc/sys/vm/swappiness                 # Current value (RHEL 8/9 default: 30)
+sudo sysctl vm.swappiness=10               # Temporary change (lost on reboot)
+echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-swappiness.conf   # Persistent
+sudo sysctl -p /etc/sysctl.d/99-swappiness.conf   # Apply without reboot
 ```
 
 ---
@@ -2008,6 +2105,43 @@ sudo systemd-tmpfiles --clean /etc/tmpfiles.d/myapp.conf
 | User | `myuser` | Owner |
 | Group | `mygroup` | Group |
 | Age | `5d` | Remove files older than 5 days (`10d`, `1h`, `-` = never) |
+
+---
+
+### `at` — One-Time Scheduled Tasks
+
+> `at` runs a command **once** at a specific future time — unlike cron which repeats. The `at` and `atd` packages are available in RHEL AppStream.
+
+```bash
+sudo dnf install at
+sudo systemctl enable --now atd             # Enable and start the at daemon
+
+# --- Schedule a job ---
+at 14:30                                    # Opens interactive prompt; type command, then Ctrl+D
+at 14:30 tomorrow
+at now + 2 hours
+at 9am next monday
+at midnight
+
+# Non-interactive (pipe command directly):
+echo "/usr/local/bin/backup.sh" | at 02:00
+echo "systemctl restart nginx" | at now + 30 minutes
+
+# --- View and manage scheduled jobs ---
+atq                                         # List pending at jobs (same as: at -l)
+at -l                                       # List pending jobs
+atrm 3                                      # Remove job number 3 (from atq output)
+at -c 3                                     # Show the full content of job number 3
+
+# --- Output ---
+# at sends job output to the user's local mail by default:
+sudo cat /var/spool/mail/root
+
+# Redirect output to a file instead:
+echo "/usr/local/bin/task.sh > /var/log/task.log 2>&1" | at 03:00
+```
+
+> Use `at` for one-time maintenance tasks, delayed restarts, or anything that should run once at a specific time. Use cron for recurring schedules.
 
 ---
 
